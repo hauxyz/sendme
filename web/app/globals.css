@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-canvas: #08080a;
+  --color-panel: #0f0f12;
+  --color-panel-raised: #141417;
+  --color-line: #232327;
+  --color-line-soft: #1b1b1f;
+  --color-brand: #8b5cf6;
+  --color-brand-strong: #7c3aed;
+  --color-brand-soft: #a78bfa;
+  --color-mint: #34d399;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  border-color: var(--color-line);
+}
+
+html {
+  background-color: var(--color-canvas);
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+::selection {
+  background: rgba(139, 92, 246, 0.35);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2f;
+  border-radius: 999px;
+  border: 3px solid var(--color-canvas);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a41;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75);
+  cursor: pointer;
+}
+
+textarea {
+  field-sizing: content;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .glass {
+    background: rgba(15, 15, 18, 0.72);
+    backdrop-filter: blur(18px);
+  }
+  .grid-glow {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.032) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.24s ease-out both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.18s ease-out both;
+}
+
+.prose-email {
+  color: #18181b;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.prose-email h1,
+.prose-email h2,
+.prose-email h3 {
+  color: #09090b;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+
+.prose-email h1 {
+  font-size: 28px;
+}
+.prose-email h2 {
+  font-size: 22px;
+}
+.prose-email h3 {
+  font-size: 18px;
+}
+.prose-email p {
+  margin: 0 0 1em;
+}
+.prose-email a {
+  color: #6d28d9;
+  text-decoration: underline;
+}
+.prose-email ul,
+.prose-email ol {
+  margin: 0 0 1em 1.25em;
+}
+.prose-email ul {
+  list-style: disc;
+}
+.prose-email ol {
+  list-style: decimal;
+}
+.prose-email li {
+  margin: 0.25em 0;
+}
+.prose-email blockquote {
+  border-left: 3px solid #d4d4d8;
+  color: #52525b;
+  margin: 1em 0;
+  padding-left: 1em;
+}
+.prose-email img {
+  max-width: 100%;
+  height: auto;
+}
+.prose-email hr {
+  border: 0;
+  border-top: 1px solid #e4e4e7;
+  margin: 1.5em 0;
+}
+
+.rich-editor {
+  background: #ffffff;
+  color: #18181b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #a1a1aa;
+  pointer-events: none;
+}
+
+.rich-editor:focus {
+  outline: none;
+}
+
+.rich-editor [style*="color: rgb(255, 255, 255)"],
+.rich-editor [style*="color:#fff"],
+.rich-editor [style*="color: #fff"] {
+  color: #18181b !important;
+}

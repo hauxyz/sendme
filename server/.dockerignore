@@ -1,0 +1,7 @@
+.git
+.env
+sendme
+server
+*.test
+*.out
+coverage/
