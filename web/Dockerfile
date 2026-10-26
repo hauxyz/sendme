@@ -1,7 +1,7 @@
 FROM node:24-alpine AS deps
 
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 
 FROM node:24-alpine AS build
