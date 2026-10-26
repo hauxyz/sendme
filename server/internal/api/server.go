@@ -56,6 +56,7 @@ func (s *Server) Router() http.Handler {
 			r.Patch("/profile", s.updateProfile)
 			r.Post("/profile/password", s.changePassword)
 			r.Patch("/workspace", s.updateWorkspace)
+			r.Post("/workspace/switch", s.switchWorkspace)
 
 			r.Get("/domains", s.listDomains)
 			r.Post("/domains", s.createDomain)

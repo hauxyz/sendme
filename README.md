@@ -15,6 +15,7 @@ Use it as a transactional email API, a campaign sender, a contact manager, or a 
 - **Webhooks** — subscribe to delivery and engagement events, sign deliveries with HMAC-SHA256, send test events, and review delivery history.
 - **API keys** — workspace-scoped bearer keys, shown in full once, with a per-key rate limit of 120 requests per minute.
 - **Analytics** — workspace overview with send, delivery, open, and click metrics.
+- **Multi-workspace membership** — an account can belong to more than one workspace and switch from the sidebar. Domains, contacts, campaigns, analytics, API keys, and webhooks stay isolated per workspace.
 - **Platform administration** — platform administrators can list and manage every user and workspace, create accounts, reset passwords, transfer memberships, and promote other administrators from the dashboard. The `admin-cli` remains available for bootstrap and recovery.
 - **Single-binary backend** — the HTTP API and background worker (asynq + Redis) run in one Go process.
 

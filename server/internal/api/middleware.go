@@ -25,12 +25,13 @@ const (
 )
 
 type sessionUser struct {
-	ID            string
-	Name          string
-	Email         string
-	IsAdmin       bool
-	WorkspaceID   string
-	WorkspaceName string
+	ID             string
+	Name           string
+	Email          string
+	IsAdmin        bool
+	WorkspaceID    string
+	WorkspaceName  string
+	SessionVersion int
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {
@@ -48,12 +49,12 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 
 		var user sessionUser
 		err = s.db.QueryRow(r.Context(), `
-			SELECT u.id, u.name, u.email, u.is_admin, w.id, w.name
+			SELECT u.id, u.name, u.email, u.is_admin, w.id, w.name, u.session_version
 			FROM users u
 			JOIN workspace_members m ON m.user_id = u.id
 			JOIN workspaces w ON w.id = m.workspace_id
 			WHERE u.id = $1 AND w.id = $2 AND u.session_version = $3
-		`, claims.UserID, claims.WorkspaceID, claims.SessionVersion).Scan(&user.ID, &user.Name, &user.Email, &user.IsAdmin, &user.WorkspaceID, &user.WorkspaceName)
+		`, claims.UserID, claims.WorkspaceID, claims.SessionVersion).Scan(&user.ID, &user.Name, &user.Email, &user.IsAdmin, &user.WorkspaceID, &user.WorkspaceName, &user.SessionVersion)
 		if err != nil {
 			httpx.Error(w, http.StatusUnauthorized, "unauthorized", "Your session is no longer valid")
 			return

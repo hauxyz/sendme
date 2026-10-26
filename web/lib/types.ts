@@ -1,6 +1,13 @@
+export type WorkspaceMembership = {
+  id: string;
+  name: string;
+  role: "owner" | "member";
+};
+
 export type Session = {
   user: { id: string; name: string; email: string; is_admin: boolean };
   workspace: { id: string; name: string };
+  workspaces: WorkspaceMembership[];
 };
 
 export type Domain = {

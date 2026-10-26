@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookOpen,
+  Check,
   ChevronDown,
   Globe,
   KeyRound,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Mail,
   Megaphone,
@@ -19,6 +21,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useSWRConfig } from "swr";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useFocusTrap } from "@/lib/use-focus-trap";
@@ -45,15 +49,27 @@ const adminNav = [{ href: "/admin", label: "Platform admin", icon: ShieldCheck }
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { mutate: mutateAll } = useSWRConfig();
   const { session, error, isLoading, mutate } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const accountRef = useRef<HTMLDivElement>(null);
   const accountButtonRef = useRef<HTMLButtonElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
   const mobileNavRef = useRef<HTMLElement>(null);
   const accountMenuId = useId();
+  const workspaceMenuId = useId();
 
-  useFocusTrap(mobileOpen, mobileNavRef, { onEscape: () => setMobileOpen(false) });
+  const closeMobileNav = () => {
+    setMobileOpen(false);
+    setWorkspaceOpen(false);
+    setAccountOpen(false);
+  };
+
+  useFocusTrap(mobileOpen, mobileNavRef, { onEscape: closeMobileNav });
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -76,6 +92,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [accountOpen]);
 
   useEffect(() => {
+    if (!workspaceOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (workspaceRef.current && !workspaceRef.current.contains(event.target as Node)) {
+        setWorkspaceOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setWorkspaceOpen(false);
+      workspaceButtonRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [workspaceOpen]);
+
+  useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -90,6 +126,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } finally {
       await mutate();
       router.replace("/login");
+    }
+  };
+
+  const switchWorkspace = async (workspaceID: string) => {
+    if (!session || switchingTo) return;
+    if (workspaceID === session.workspace.id) {
+      setWorkspaceOpen(false);
+      return;
+    }
+    setSwitchingTo(workspaceID);
+    try {
+      const nextSession = await api<typeof session>("/workspace/switch", {
+        method: "POST",
+        body: { workspace_id: workspaceID },
+      });
+      // Workspace-scoped SWR keys are not namespaced, so drop them before
+      // navigating. Otherwise the next workspace could briefly render cached
+      // data from the previous workspace.
+      await mutateAll((key) => key !== "/auth/me", undefined, { revalidate: false });
+      await mutate(nextSession, { revalidate: false });
+      closeMobileNav();
+      router.replace("/dashboard");
+      router.refresh();
+      toast.success(`Switched to ${nextSession.workspace.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not switch workspace");
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
@@ -123,6 +187,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const workspaceOptions = session.workspaces?.length
+    ? session.workspaces
+    : [{ ...session.workspace, role: "owner" as const }];
+  const canSwitchWorkspace = workspaceOptions.length > 1;
+
   const sidebar = (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center justify-between px-5">
@@ -133,23 +202,92 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           type="button"
           data-autofocus
           className="rounded-lg p-1.5 text-zinc-500 outline-none transition hover:bg-white/5 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-violet-500/60 lg:hidden"
-          onClick={() => setMobileOpen(false)}
+          onClick={closeMobileNav}
           aria-label="Close navigation"
         >
           <X className="size-4" />
         </button>
       </div>
 
-      <div className="px-3">
-        <div className="flex items-center gap-2.5 rounded-lg border border-[#202024] bg-white/[0.025] px-3 py-2.5">
-          <div className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-zinc-700 to-zinc-800 text-[10px] font-semibold text-zinc-200">
+      <div className="relative px-3" ref={workspaceRef}>
+        <button
+          ref={workspaceButtonRef}
+          type="button"
+          disabled={!canSwitchWorkspace || Boolean(switchingTo)}
+          aria-haspopup={canSwitchWorkspace ? "menu" : undefined}
+          aria-expanded={canSwitchWorkspace ? workspaceOpen : undefined}
+          aria-controls={canSwitchWorkspace ? workspaceMenuId : undefined}
+          onClick={() => {
+            setAccountOpen(false);
+            setWorkspaceOpen((open) => !open);
+          }}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-lg border border-[#202024] bg-white/[0.025] px-3 py-2.5 text-left outline-none transition",
+            canSwitchWorkspace
+              ? "hover:border-[#303036] hover:bg-white/[0.04] focus-visible:border-violet-500/50 focus-visible:ring-2 focus-visible:ring-violet-500/40"
+              : "cursor-default",
+            workspaceOpen && "border-[#34343b] bg-white/[0.04]",
+          )}
+          title={canSwitchWorkspace ? "Switch workspace" : undefined}
+        >
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-zinc-700 to-zinc-800 text-[10px] font-semibold text-zinc-200">
             {initials(session.workspace.name)}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-zinc-200">{session.workspace.name}</p>
-            <p className="text-[10px] uppercase tracking-[0.12em] text-zinc-600">Self-hosted</p>
+            <p className="text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+              {canSwitchWorkspace ? `${workspaceOptions.length} workspaces` : "Self-hosted"}
+            </p>
           </div>
-        </div>
+          {switchingTo ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-violet-300" />
+          ) : canSwitchWorkspace ? (
+            <ChevronDown className={cn("size-3.5 shrink-0 text-zinc-600 transition", workspaceOpen && "rotate-180")} />
+          ) : null}
+        </button>
+
+        {workspaceOpen ? (
+          <div
+            id={workspaceMenuId}
+            role="menu"
+            aria-label="Switch workspace"
+            className="animate-fade-in absolute left-3 right-3 top-full z-50 mt-1 overflow-hidden rounded-lg border border-[#2a2a2f] bg-[#141417] p-1 shadow-2xl"
+          >
+            {workspaceOptions.map((workspace) => {
+              const current = workspace.id === session.workspace.id;
+              const switching = switchingTo === workspace.id;
+              return (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={current}
+                  disabled={Boolean(switchingTo)}
+                  onClick={() => switchWorkspace(workspace.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left outline-none transition focus-visible:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-violet-500/50 disabled:cursor-wait disabled:opacity-70",
+                    current ? "bg-white/[0.055]" : "hover:bg-white/[0.05]",
+                  )}
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-zinc-700 to-zinc-800 text-[10px] font-semibold text-zinc-200">
+                    {initials(workspace.name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-zinc-200">{workspace.name}</span>
+                    <span className="block text-[10px] uppercase tracking-[0.1em] text-zinc-600">
+                      {workspace.role === "owner" ? "Owner" : "Member"}
+                    </span>
+                  </span>
+                  {switching ? (
+                    <Loader2 className="size-3.5 shrink-0 animate-spin text-violet-300" />
+                  ) : current ? (
+                    <Check className="size-3.5 shrink-0 text-violet-300" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       <nav aria-label="Primary navigation" className="mt-6 flex-1 space-y-6 overflow-y-auto px-3 pb-6">
@@ -189,7 +327,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             aria-expanded={accountOpen}
             aria-controls={accountMenuId}
-            onClick={() => setAccountOpen((open) => !open)}
+            onClick={() => {
+              setWorkspaceOpen(false);
+              setAccountOpen((open) => !open);
+            }}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-left outline-none transition hover:border-[#26262b] hover:bg-white/[0.03] focus-visible:border-violet-500/50 focus-visible:ring-2 focus-visible:ring-violet-500/40",
               accountOpen && "border-[#26262b] bg-white/[0.03]",
@@ -252,7 +393,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             tabIndex={-1}
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setMobileOpen(false)}
+            onClick={closeMobileNav}
             aria-label="Close navigation"
           />
           <aside
@@ -263,7 +404,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             tabIndex={-1}
             className="animate-fade-in absolute inset-y-0 left-0 w-[280px] border-r border-[#1c1c20] bg-[#0b0b0e] outline-none"
             onClick={(event) => {
-              if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
+              if ((event.target as HTMLElement).closest("a")) closeMobileNav();
             }}
           >
             {sidebar}

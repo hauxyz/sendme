@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -26,9 +27,40 @@ type authWorkspace struct {
 	Name string `json:"name"`
 }
 
+type authWorkspaceMembership struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
 type authResponse struct {
-	User      authUser      `json:"user"`
-	Workspace authWorkspace `json:"workspace"`
+	User       authUser                  `json:"user"`
+	Workspace  authWorkspace             `json:"workspace"`
+	Workspaces []authWorkspaceMembership `json:"workspaces"`
+}
+
+func (s *Server) loadUserWorkspaces(ctx context.Context, userID string) ([]authWorkspaceMembership, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT w.id, w.name, m.role
+		FROM workspace_members m
+		JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.user_id = $1
+		ORDER BY m.created_at ASC, w.name ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	workspaces := make([]authWorkspaceMembership, 0)
+	for rows.Next() {
+		var workspace authWorkspaceMembership
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.Role); err != nil {
+			return nil, err
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	return workspaces, rows.Err()
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +147,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, authResponse{
 		User:      authUser{ID: userID, Name: req.Name, Email: req.Email},
 		Workspace: authWorkspace{ID: workspaceID, Name: req.WorkspaceName},
+		Workspaces: []authWorkspaceMembership{
+			{ID: workspaceID, Name: req.WorkspaceName, Role: "owner"},
+		},
 	})
 }
 
@@ -141,18 +176,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID, name, email, passwordHash, workspaceID, workspaceName string
+	var userID, name, email, passwordHash string
 	var sessionVersion int
 	var isAdmin bool
 	err := s.db.QueryRow(r.Context(), `
-		SELECT u.id, u.name, u.email, u.password_hash, w.id, w.name, u.session_version, u.is_admin
-		FROM users u
-		JOIN workspace_members m ON m.user_id = u.id
-		JOIN workspaces w ON w.id = m.workspace_id
-		WHERE u.email = $1
-		ORDER BY m.created_at ASC
-		LIMIT 1
-	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &workspaceID, &workspaceName, &sessionVersion, &isAdmin)
+		SELECT id, name, email, password_hash, session_version, is_admin
+		FROM users
+		WHERE email = $1
+	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &sessionVersion, &isAdmin)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			s.logger.Error("login lookup", "error", err)
@@ -165,15 +196,28 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.tokens.Issue(userID, workspaceID, sessionVersion)
+	workspaces, err := s.loadUserWorkspaces(r.Context(), userID)
+	if err != nil {
+		s.logger.Error("load workspaces", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not load your workspaces")
+		return
+	}
+	if len(workspaces) == 0 {
+		httpx.Error(w, http.StatusForbidden, "no_workspace", "Your account does not belong to a workspace")
+		return
+	}
+
+	workspace := workspaces[0]
+	token, err := s.tokens.Issue(userID, workspace.ID, sessionVersion)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not create a session")
 		return
 	}
 	s.tokens.SetCookie(w, token)
 	httpx.JSON(w, http.StatusOK, authResponse{
-		User:      authUser{ID: userID, Name: name, Email: email, IsAdmin: isAdmin},
-		Workspace: authWorkspace{ID: workspaceID, Name: workspaceName},
+		User:       authUser{ID: userID, Name: name, Email: email, IsAdmin: isAdmin},
+		Workspace:  authWorkspace{ID: workspace.ID, Name: workspace.Name},
+		Workspaces: workspaces,
 	})
 }
 
@@ -188,9 +232,74 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "You must be signed in")
 		return
 	}
+	workspaces, err := s.loadUserWorkspaces(r.Context(), user.ID)
+	if err != nil {
+		s.logger.Error("load workspaces", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not load your workspaces")
+		return
+	}
 	httpx.JSON(w, http.StatusOK, authResponse{
-		User:      authUser{ID: user.ID, Name: user.Name, Email: user.Email, IsAdmin: user.IsAdmin},
-		Workspace: authWorkspace{ID: user.WorkspaceID, Name: user.WorkspaceName},
+		User:       authUser{ID: user.ID, Name: user.Name, Email: user.Email, IsAdmin: user.IsAdmin},
+		Workspace:  authWorkspace{ID: user.WorkspaceID, Name: user.WorkspaceName},
+		Workspaces: workspaces,
+	})
+}
+
+func (s *Server) switchWorkspace(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if user == nil {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "You must be signed in")
+		return
+	}
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	if req.WorkspaceID == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_workspace", "Choose a workspace to switch to")
+		return
+	}
+
+	var workspaceName string
+	err := s.db.QueryRow(r.Context(), `
+		SELECT w.name
+		FROM workspace_members m
+		JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.user_id = $1 AND w.id = $2
+	`, user.ID, req.WorkspaceID).Scan(&workspaceName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "workspace_not_found", "Workspace not found")
+			return
+		}
+		s.logger.Error("switch workspace lookup", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not switch workspace")
+		return
+	}
+
+	token, err := s.tokens.Issue(user.ID, req.WorkspaceID, user.SessionVersion)
+	if err != nil {
+		s.logger.Error("issue session after workspace switch", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not switch workspace")
+		return
+	}
+	s.tokens.SetCookie(w, token)
+
+	workspaces, err := s.loadUserWorkspaces(r.Context(), user.ID)
+	if err != nil {
+		s.logger.Error("load workspaces", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Workspace switched, but the session could not be reloaded")
+		return
+	}
+	user.WorkspaceID = req.WorkspaceID
+	user.WorkspaceName = workspaceName
+	httpx.JSON(w, http.StatusOK, authResponse{
+		User:       authUser{ID: user.ID, Name: user.Name, Email: user.Email, IsAdmin: user.IsAdmin},
+		Workspace:  authWorkspace{ID: req.WorkspaceID, Name: workspaceName},
+		Workspaces: workspaces,
 	})
 }
 
