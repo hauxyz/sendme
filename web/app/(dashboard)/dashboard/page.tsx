@@ -93,11 +93,11 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="grid w-full gap-2 sm:w-auto sm:min-w-[310px]">
-              {setupSteps.slice(0, 3).map((step) => (
+              {setupSteps.map((step) => (
                 <Link
                   key={step.label}
                   href={step.href}
-                  className="flex items-center gap-2.5 rounded-lg border border-white/[0.055] bg-black/20 px-3 py-2 text-[12px] text-zinc-300 transition hover:border-violet-500/20 hover:bg-violet-500/[0.04]"
+                  className="flex items-center gap-2.5 rounded-lg border border-white/[0.055] bg-black/20 px-3 py-2 text-[12px] text-zinc-300 outline-none transition hover:border-violet-500/20 hover:bg-violet-500/[0.04] focus-visible:ring-2 focus-visible:ring-violet-500/50"
                 >
                   <span
                     className={cn(
@@ -115,7 +115,14 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-          <div className="h-0.5 w-full bg-white/[0.04]">
+          <div
+            role="progressbar"
+            aria-label="Workspace setup progress"
+            aria-valuemin={0}
+            aria-valuemax={setupSteps.length}
+            aria-valuenow={doneSteps}
+            className="h-0.5 w-full bg-white/[0.04]"
+          >
             <div
               className="h-full bg-gradient-to-r from-violet-500 to-indigo-400 transition-all duration-500"
               style={{ width: `${(doneSteps / setupSteps.length) * 100}%` }}
@@ -162,14 +169,19 @@ export default function DashboardPage() {
               <h2 className="text-sm font-semibold text-zinc-100">Sending activity</h2>
               <p className="mt-1 text-xs text-zinc-500">Emails sent and opened over time.</p>
             </div>
-            <div className="flex items-center rounded-lg border border-[#2a2a2f] bg-[#0a0a0d] p-0.5">
+            <div
+              className="flex items-center rounded-lg border border-[#2a2a2f] bg-[#0a0a0d] p-0.5"
+              role="group"
+              aria-label="Sending activity period"
+            >
               {[7, 14, 30].map((value) => (
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={days === value}
                   onClick={() => setDays(value)}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition",
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-violet-500/50",
                     days === value ? "bg-white/[0.08] text-zinc-200" : "text-zinc-600 hover:text-zinc-300",
                   )}
                 >

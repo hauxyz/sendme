@@ -13,11 +13,11 @@ init: ## Create .env from the example and generate fresh secrets
 	KEY=$$(openssl rand -base64 32 | tr -d '\n'); \
 	SIG=$$(openssl rand -base64 32 | tr -d '\n'); \
 	perl -pi -e "s|^JWT_SECRET=.*|JWT_SECRET=$$JWT|; s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$$KEY|; s|^SIGNING_SECRET=.*|SIGNING_SECRET=$$SIG|" .env
-	@echo "Created .env with generated secrets. Review APP_URL, API_PUBLIC_URL and COOKIE settings before deploying."
+	@echo "Created .env with generated secrets. Review APP_URL, NEXT_PUBLIC_API_PUBLIC_URL, API_PUBLIC_URL and COOKIE settings before deploying."
 
 dev: ## Run the API and Next.js dev server together
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$API_PUBLIC_URL}"; \
+	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$APP_URL}"; \
 	(cd server && exec go run ./cmd/server) & api=$$!; \
 	(cd web && exec npm run dev) & web=$$!; \
 	trap 'kill $$api $$web 2>/dev/null' EXIT INT TERM; \
@@ -45,7 +45,7 @@ build: ## Build the Go binaries and the Next.js production bundle
 	cd server && go build -o bin/sendme ./cmd/server
 	cd server && go build -o bin/admin-cli ./cmd/admin-cli
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$API_PUBLIC_URL}"; \
+	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$APP_URL}"; \
 	cd web && npm run build
 
 api: ## Run the Go API with the worker enabled
@@ -53,7 +53,7 @@ api: ## Run the Go API with the worker enabled
 
 web: ## Run the Next.js dev server
 	@set -a; [ -f .env ] && . ./.env; set +a; \
-	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$API_PUBLIC_URL}"; \
+	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$APP_URL}"; \
 	cd web && npm run dev
 
 admin-cli: ## Run the admin CLI (ARGS="create-admin --email ...")

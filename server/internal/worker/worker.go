@@ -71,6 +71,7 @@ type emailJob struct {
 	Text           string
 	Status         string
 	Attempts       int
+	ScheduledAt    *time.Time
 	TrackingID     string
 	TrackOpens     bool
 	TrackClicks    bool
@@ -92,6 +93,9 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 	}
 	if job.Status == "sent" {
 		return nil
+	}
+	if job.Status == "queued" && job.ScheduledAt != nil && job.ScheduledAt.After(time.Now().Add(2*time.Second)) {
+		return w.queue.EnqueueEmail(job.ID, *job.ScheduledAt)
 	}
 
 	var attempts int
@@ -203,11 +207,11 @@ func (w *Worker) loadEmailJob(ctx context.Context, emailID string) (*emailJob, e
 	var job emailJob
 	err := w.db.QueryRow(ctx, `
 		SELECT id, workspace_id, domain_id, campaign_id, to_email, to_name, from_email, from_name, reply_to,
-			subject, html, text_content, status, attempts, tracking_id, track_opens, track_clicks, unsubscribe_url, headers
+			subject, html, text_content, status, attempts, scheduled_at, tracking_id, track_opens, track_clicks, unsubscribe_url, headers
 		FROM emails WHERE id = $1
 	`, emailID).Scan(
 		&job.ID, &job.WorkspaceID, &job.DomainID, &job.CampaignID, &job.ToEmail, &job.ToName, &job.FromEmail, &job.FromName, &job.ReplyTo,
-		&job.Subject, &job.HTML, &job.Text, &job.Status, &job.Attempts, &job.TrackingID, &job.TrackOpens, &job.TrackClicks,
+		&job.Subject, &job.HTML, &job.Text, &job.Status, &job.Attempts, &job.ScheduledAt, &job.TrackingID, &job.TrackOpens, &job.TrackClicks,
 		&job.UnsubscribeURL, &job.Headers,
 	)
 	return &job, err
@@ -262,7 +266,10 @@ func (w *Worker) handleCampaign(ctx context.Context, task *asynq.Task) error {
 	var trackOpens, trackClicks bool
 	err := w.db.QueryRow(ctx, `
 		SELECT c.workspace_id, c.name, c.subject, c.html, c.from_domain_id, c.audience_id,
-			c.track_opens, c.track_clicks, COALESCE(d.from_email, ''), COALESCE(d.from_name, ''), COALESCE(d.reply_to, '')
+			c.track_opens, c.track_clicks,
+			COALESCE(NULLIF(c.from_email, ''), d.from_email, ''),
+			COALESCE(NULLIF(c.from_name, ''), d.from_name, ''),
+			COALESCE(NULLIF(c.reply_to, ''), d.reply_to, '')
 		FROM campaigns c LEFT JOIN domains d ON d.id = c.from_domain_id
 		WHERE c.id = $1
 	`, payload.CampaignID).Scan(&workspaceID, &name, &subject, &html, &domainID, &audienceID,

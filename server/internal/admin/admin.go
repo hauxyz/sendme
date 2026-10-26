@@ -87,8 +87,8 @@ func (s *Service) CreateOwner(ctx context.Context, in CreateOwnerInput) (Account
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (id, name, email, password_hash)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO users (id, name, email, password_hash, is_admin)
+		VALUES ($1, $2, $3, $4, true)
 	`, account.UserID, account.Name, account.Email, passwordHash)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -153,6 +153,27 @@ func (s *Service) ResetPassword(ctx context.Context, email, password string) (Ac
 
 func normalizeEmail(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// SetAdmin grants or revokes platform administrator access.
+func (s *Service) SetAdmin(ctx context.Context, email string, isAdmin bool) (Account, error) {
+	email = normalizeEmail(email)
+	if !validate.Email(email) {
+		return Account{}, errors.New("enter a valid email address")
+	}
+	account := Account{Email: email}
+	err := s.db.QueryRow(ctx, `
+		UPDATE users SET is_admin = $1, updated_at = now()
+		WHERE email = $2
+		RETURNING id, name
+	`, isAdmin, email).Scan(&account.UserID, &account.Name)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Account{}, ErrUserNotFound
+		}
+		return Account{}, fmt.Errorf("update admin access: %w", err)
+	}
+	return account, nil
 }
 
 func validatePassword(password string) error {

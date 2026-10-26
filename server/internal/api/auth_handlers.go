@@ -15,9 +15,10 @@ import (
 )
 
 type authUser struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Email   string `json:"email"`
+	IsAdmin bool   `json:"is_admin"`
 }
 
 type authWorkspace struct {
@@ -142,15 +143,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 	var userID, name, email, passwordHash, workspaceID, workspaceName string
 	var sessionVersion int
+	var isAdmin bool
 	err := s.db.QueryRow(r.Context(), `
-		SELECT u.id, u.name, u.email, u.password_hash, w.id, w.name, u.session_version
+		SELECT u.id, u.name, u.email, u.password_hash, w.id, w.name, u.session_version, u.is_admin
 		FROM users u
 		JOIN workspace_members m ON m.user_id = u.id
 		JOIN workspaces w ON w.id = m.workspace_id
 		WHERE u.email = $1
 		ORDER BY m.created_at ASC
 		LIMIT 1
-	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &workspaceID, &workspaceName, &sessionVersion)
+	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &workspaceID, &workspaceName, &sessionVersion, &isAdmin)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			s.logger.Error("login lookup", "error", err)
@@ -170,7 +172,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.tokens.SetCookie(w, token)
 	httpx.JSON(w, http.StatusOK, authResponse{
-		User:      authUser{ID: userID, Name: name, Email: email},
+		User:      authUser{ID: userID, Name: name, Email: email, IsAdmin: isAdmin},
 		Workspace: authWorkspace{ID: workspaceID, Name: workspaceName},
 	})
 }
@@ -187,7 +189,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, authResponse{
-		User:      authUser{ID: user.ID, Name: user.Name, Email: user.Email},
+		User:      authUser{ID: user.ID, Name: user.Name, Email: user.Email, IsAdmin: user.IsAdmin},
 		Workspace: authWorkspace{ID: user.WorkspaceID, Name: user.WorkspaceName},
 	})
 }

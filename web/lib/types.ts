@@ -1,5 +1,5 @@
 export type Session = {
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string; is_admin: boolean };
   workspace: { id: string; name: string };
 };
 
@@ -71,7 +71,7 @@ export type EmailSummary = {
   from_email: string;
   from_name: string;
   subject: string;
-  status: "queued" | "sending" | "sent" | "failed";
+  status: "queued" | "sending" | "sent" | "failed" | "canceled";
   error: string;
   source: "api" | "campaign" | "dashboard" | "test";
   domain_id: string | null;
@@ -119,6 +119,7 @@ export type Campaign = {
   from_domain_id: string | null;
   from_email: string;
   from_name: string;
+  reply_to: string;
   domain_name: string;
   audience_id: string | null;
   audience_name: string;
@@ -203,3 +204,31 @@ export type Analytics = {
 };
 
 export type Paginated<T> = { total: number } & T;
+
+export type AdminUser = {
+  id: string;
+  name: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+  workspaces: { id: string; name: string; role: "owner" | "member" }[];
+};
+
+export type AdminWorkspace = {
+  id: string;
+  name: string;
+  created_at: string;
+  owner: { id: string; name: string; email: string } | null;
+  member_count: number;
+  domain_count: number;
+  email_count: number;
+};
+
+export type AdminMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "member";
+  is_admin: boolean;
+  created_at: string;
+};

@@ -1,9 +1,10 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 import { Button } from "./button";
 
 const sizes = {
@@ -30,19 +31,20 @@ export function Modal({
   footer?: ReactNode;
   size?: keyof typeof sizes;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useFocusTrap(open, dialogRef, { onEscape: onClose });
+
   useEffect(() => {
     if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previous;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -51,21 +53,32 @@ export function Modal({
       <button
         type="button"
         aria-label="Close dialog"
+        tabIndex={-1}
         className="absolute inset-0 bg-black/70 backdrop-blur-[3px]"
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
         className={cn(
-          "animate-scale-in relative z-10 flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a2f] bg-[#111114] shadow-[0_30px_120px_rgba(0,0,0,0.65)] sm:rounded-2xl",
+          "animate-scale-in relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a2f] bg-[#111114] shadow-[0_30px_120px_rgba(0,0,0,0.65)] outline-none sm:rounded-2xl",
           sizes[size],
         )}
       >
         <div className="flex items-start justify-between gap-4 border-b border-[#1f1f24] px-6 py-5">
-          <div>
-            <h2 className="text-base font-semibold tracking-tight text-zinc-50">{title}</h2>
-            {description ? <p className="mt-1 text-sm leading-relaxed text-zinc-500">{description}</p> : null}
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-base font-semibold tracking-tight text-zinc-50">
+              {title}
+            </h2>
+            {description ? (
+              <p id={descriptionId} className="mt-1 text-sm leading-relaxed text-zinc-500">
+                {description}
+              </p>
+            ) : null}
           </div>
           <Button variant="ghost" size="icon" className="-mr-1 -mt-1 shrink-0" onClick={onClose} aria-label="Close">
             <X className="size-4" />
@@ -73,7 +86,7 @@ export function Modal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer ? (
-          <div className="flex items-center justify-end gap-2 border-t border-[#1f1f24] bg-[#0e0e11] px-6 py-4">
+          <div className="flex items-center justify-end gap-2 border-t border-[#1f1f24] bg-[#0e0e11] px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4">
             {footer}
           </div>
         ) : null}

@@ -9,6 +9,7 @@ import {
   Mail,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -283,9 +284,10 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
         }
       />
 
-      <div className="mb-6 flex items-center gap-1 rounded-xl border border-[#232327] bg-[#0f0f12] p-1">
+      <div className="mb-6 flex items-center gap-1 rounded-xl border border-[#232327] bg-[#0f0f12] p-1" role="group" aria-label="Contacts view">
         <button
           type="button"
+          aria-pressed={tab === "contacts"}
           onClick={() => setTab("contacts")}
           className={cn(
             "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[13px] font-medium transition sm:flex-none",
@@ -302,6 +304,7 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
         </button>
         <button
           type="button"
+          aria-pressed={tab === "audiences"}
           onClick={() => setTab("audiences")}
           className={cn(
             "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[13px] font-medium transition sm:flex-none",
@@ -328,8 +331,19 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search email or name…"
-                  className="h-9 pl-9 text-[13px]"
+                  aria-label="Search contacts"
+                  className="h-9 pl-9 pr-8 text-[13px]"
                 />
+                {search ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                ) : null}
               </div>
               <Select
                 value={audienceFilter}
@@ -350,7 +364,7 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
               </Select>
             </div>
 
-            <div className="flex items-center gap-1 overflow-x-auto">
+            <div className="flex items-center gap-1 overflow-x-auto" role="group" aria-label="Filter contacts by subscription status">
               {[
                 { value: "all", label: "All" },
                 { value: "subscribed", label: "Subscribed" },
@@ -359,6 +373,7 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
                 <button
                   key={filter.value}
                   type="button"
+                  aria-pressed={status === filter.value}
                   onClick={() => {
                     setStatus(filter.value);
                     setOffset(0);
@@ -441,9 +456,15 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
             </div>
           ) : contactsError ? (
             <EmptyState
-              icon={<Users className="size-5" />}
+              icon={<RefreshCw className="size-5" />}
               title="Couldn't load contacts"
-              description="There was a problem reaching the API. Refresh the page to try again."
+              description={contactsError instanceof ApiError ? contactsError.message : "There was a problem reaching the API. Try again."}
+              action={
+                <Button variant="secondary" onClick={() => mutateContacts()}>
+                  <RefreshCw className="size-3.5" />
+                  Try again
+                </Button>
+              }
             />
           ) : contacts.length === 0 ? (
             <EmptyState
@@ -479,7 +500,7 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
             />
           ) : (
             <>
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto xl:block">
                 <table className="w-full min-w-[840px] text-left">
                   <thead>
                     <tr className="border-b border-[#1b1b1f] text-[10px] uppercase tracking-[0.1em] text-zinc-600">
@@ -587,8 +608,78 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
                 </table>
               </div>
 
+              <div className="xl:hidden">
+                <div className="flex items-center gap-3 border-b border-[#1e1e22] px-4 py-2.5">
+                  <Checkbox
+                    checked={allSelected}
+                    onChange={togglePage}
+                    aria-label="Select all contacts on this page"
+                  />
+                  <span className="text-[11px] text-zinc-500">
+                    {allSelected ? "Clear page selection" : "Select page"}
+                  </span>
+                </div>
+                <div className="divide-y divide-[#1a1a1e]">
+                  {contacts.map((contact) => {
+                    const displayName =
+                      [contact.first_name, contact.last_name].filter(Boolean).join(" ") || contact.email;
+                    return (
+                      <div key={contact.id} className="p-4">
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={selected.has(contact.id)}
+                            onChange={() => toggleSelected(contact.id)}
+                            aria-label={`Select ${contact.email}`}
+                            className="mt-1"
+                          />
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-[#2a2a2f] bg-white/[0.035] text-[10px] font-semibold text-zinc-400">
+                            {initials(displayName)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-medium text-zinc-200">{displayName}</p>
+                            {displayName !== contact.email ? (
+                              <p className="truncate text-[11px] text-zinc-600">{contact.email}</p>
+                            ) : null}
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <Badge tone={contact.unsubscribed ? "zinc" : "mint"} dot>
+                                {contact.unsubscribed ? "Unsubscribed" : "Subscribed"}
+                              </Badge>
+                              {contact.audiences.length > 0 ? (
+                                <span className="truncate text-[10px] text-zinc-600">
+                                  {contact.audiences.map((audience) => audience.name).join(", ")}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-zinc-700">No audience</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between">
+                          <span className="text-[10px] text-zinc-600">Added {formatRelative(contact.created_at)}</span>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => openEditContact(contact)} aria-label={`Edit ${contact.email}`}>
+                              <Pencil className="size-3.5" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-zinc-600 hover:text-rose-300"
+                              onClick={() => setDeletingContact(contact)}
+                              aria-label={`Delete ${contact.email}`}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {total > 0 ? (
-                <div className="flex items-center justify-between border-t border-[#1e1e22] px-5 py-3">
+                <div className="flex flex-col gap-3 border-t border-[#1e1e22] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-[11px] text-zinc-500">
                     {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {formatNumber(total)}
                   </p>
@@ -647,9 +738,15 @@ function ContactsManager({ initialAudience }: { initialAudience: string }) {
           ) : audiencesError ? (
             <Card>
               <EmptyState
-                icon={<Users className="size-5" />}
+                icon={<RefreshCw className="size-5" />}
                 title="Couldn't load audiences"
-                description="There was a problem reaching the API. Refresh the page to try again."
+                description={audiencesError instanceof ApiError ? audiencesError.message : "There was a problem reaching the API. Try again."}
+                action={
+                  <Button variant="secondary" onClick={() => mutateAudiences()}>
+                    <RefreshCw className="size-3.5" />
+                    Try again
+                  </Button>
+                }
               />
             </Card>
           ) : audiences.length === 0 ? (

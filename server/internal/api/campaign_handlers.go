@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,6 +22,7 @@ type Campaign struct {
 	FromDomainID    *string    `json:"from_domain_id"`
 	FromEmail       string     `json:"from_email"`
 	FromName        string     `json:"from_name"`
+	ReplyTo         string     `json:"reply_to"`
 	DomainName      string     `json:"domain_name"`
 	AudienceID      *string    `json:"audience_id"`
 	AudienceName    string     `json:"audience_name"`
@@ -43,7 +45,10 @@ type Campaign struct {
 
 const campaignSelect = `
 	SELECT c.id, c.name, c.subject, c.preview_text, c.from_domain_id,
-		COALESCE(d.from_email, '') AS from_email, COALESCE(d.from_name, '') AS from_name, COALESCE(d.name, '') AS domain_name,
+		COALESCE(NULLIF(c.from_email, ''), d.from_email, '') AS from_email,
+		COALESCE(NULLIF(c.from_name, ''), d.from_name, '') AS from_name,
+		COALESCE(NULLIF(c.reply_to, ''), d.reply_to, '') AS reply_to,
+		COALESCE(d.name, '') AS domain_name,
 		c.audience_id, COALESCE(a.name, '') AS audience_name, c.html, c.status,
 		c.scheduled_at, c.started_at, c.completed_at, c.track_opens, c.track_clicks,
 		c.total_recipients, c.created_at, c.updated_at,
@@ -61,7 +66,7 @@ func scanCampaign(row pgx.Row) (Campaign, error) {
 	var c Campaign
 	err := row.Scan(
 		&c.ID, &c.Name, &c.Subject, &c.PreviewText, &c.FromDomainID,
-		&c.FromEmail, &c.FromName, &c.DomainName,
+		&c.FromEmail, &c.FromName, &c.ReplyTo, &c.DomainName,
 		&c.AudienceID, &c.AudienceName, &c.HTML, &c.Status,
 		&c.ScheduledAt, &c.StartedAt, &c.CompletedAt, &c.TrackOpens, &c.TrackClicks,
 		&c.TotalRecipients, &c.CreatedAt, &c.UpdatedAt,
@@ -184,8 +189,67 @@ func (s *Server) createCampaign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getCampaignByID(r *http.Request, id string) (Campaign, error) {
-	row := s.db.QueryRow(r.Context(), campaignSelect+` WHERE c.id = $1 AND c.workspace_id = $2`, id, workspaceID(r))
+	return s.getCampaignByIDContext(r.Context(), workspaceID(r), id)
+}
+
+func (s *Server) getCampaignByIDContext(ctx context.Context, workspace, id string) (Campaign, error) {
+	row := s.db.QueryRow(ctx, campaignSelect+` WHERE c.id = $1 AND c.workspace_id = $2`, id, workspace)
 	return scanCampaign(row)
+}
+
+type campaignScheduleFailure struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (s *Server) scheduleCampaign(ctx context.Context, workspace, campaignID string, scheduledAt time.Time) (Campaign, *campaignScheduleFailure) {
+	c, err := s.getCampaignByIDContext(ctx, workspace, campaignID)
+	if err != nil {
+		return Campaign{}, &campaignScheduleFailure{http.StatusNotFound, "campaign_not_found", "Campaign not found"}
+	}
+	if c.Status != "draft" {
+		return Campaign{}, &campaignScheduleFailure{http.StatusConflict, "campaign_locked", "This campaign has already been scheduled or sent"}
+	}
+	if c.Subject == "" || c.HTML == "" || c.FromDomainID == nil || c.AudienceID == nil {
+		return Campaign{}, &campaignScheduleFailure{http.StatusBadRequest, "campaign_incomplete", "Add a subject, sender, audience and email content before sending"}
+	}
+	d, err := s.loadDomain(ctx, workspace, *c.FromDomainID)
+	if err != nil || d.Status != "active" {
+		return Campaign{}, &campaignScheduleFailure{http.StatusUnprocessableEntity, "domain_not_active", "The sending domain must pass a delivery test before you can send campaigns"}
+	}
+	var recipientCount int
+	if err := s.db.QueryRow(ctx, `
+		SELECT count(*) FROM audience_members am
+		JOIN contacts c ON c.id = am.contact_id
+		WHERE am.audience_id = $1 AND c.unsubscribed = false
+	`, *c.AudienceID).Scan(&recipientCount); err != nil {
+		return Campaign{}, &campaignScheduleFailure{http.StatusInternalServerError, "internal_error", "Could not count campaign recipients"}
+	}
+	if recipientCount == 0 {
+		return Campaign{}, &campaignScheduleFailure{http.StatusUnprocessableEntity, "empty_audience", "This audience has no subscribed contacts"}
+	}
+
+	tag, err := s.db.Exec(ctx, `
+		UPDATE campaigns SET status = 'scheduled', scheduled_at = $1, total_recipients = $2, updated_at = now()
+		WHERE id = $3 AND workspace_id = $4 AND status = 'draft'
+	`, scheduledAt, recipientCount, campaignID, workspace)
+	if err != nil {
+		return Campaign{}, &campaignScheduleFailure{http.StatusInternalServerError, "internal_error", "Could not schedule the campaign"}
+	}
+	if tag.RowsAffected() == 0 {
+		return Campaign{}, &campaignScheduleFailure{http.StatusConflict, "campaign_locked", "This campaign has already been scheduled or sent"}
+	}
+	if err := s.queue.EnqueueCampaign(campaignID, scheduledAt); err != nil {
+		_, _ = s.db.Exec(ctx, `UPDATE campaigns SET status = 'draft', scheduled_at = NULL WHERE id = $1`, campaignID)
+		s.logger.Error("enqueue campaign", "error", err)
+		return Campaign{}, &campaignScheduleFailure{http.StatusInternalServerError, "internal_error", "Could not queue the campaign"}
+	}
+	updated, err := s.getCampaignByIDContext(ctx, workspace, campaignID)
+	if err != nil {
+		return Campaign{}, &campaignScheduleFailure{http.StatusInternalServerError, "internal_error", "Could not load the campaign"}
+	}
+	return updated, nil
 }
 
 func (s *Server) updateCampaign(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +306,9 @@ func (s *Server) updateCampaign(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		args = append(args, *req.FromDomainID)
-		set = append(set, fmt.Sprintf("from_domain_id = NULLIF($%d,'')::uuid", len(args)))
+		set = append(set,
+			fmt.Sprintf("from_domain_id = NULLIF($%d,'')::uuid", len(args)),
+			"from_email = ''", "from_name = ''", "reply_to = ''")
 	}
 	if req.AudienceID != nil {
 		if *req.AudienceID != "" {
@@ -302,58 +368,11 @@ func (s *Server) sendCampaign(w http.ResponseWriter, r *http.Request) {
 		scheduledAt = parsed.UTC()
 	}
 
-	c, err := s.getCampaignByID(r, campaignID)
-	if err != nil {
-		httpx.Error(w, http.StatusNotFound, "campaign_not_found", "Campaign not found")
+	updated, failure := s.scheduleCampaign(r.Context(), workspaceID(r), campaignID, scheduledAt)
+	if failure != nil {
+		httpx.Error(w, failure.Status, failure.Code, failure.Message)
 		return
 	}
-	if c.Status != "draft" {
-		httpx.Error(w, http.StatusConflict, "campaign_locked", "This campaign has already been scheduled or sent")
-		return
-	}
-	if c.Subject == "" || c.HTML == "" || c.FromDomainID == nil || c.AudienceID == nil {
-		httpx.Error(w, http.StatusBadRequest, "campaign_incomplete", "Add a subject, sender, audience and email content before sending")
-		return
-	}
-	d, err := s.loadDomain(r.Context(), workspaceID(r), *c.FromDomainID)
-	if err != nil || d.Status != "active" {
-		httpx.Error(w, http.StatusUnprocessableEntity, "domain_not_active", "The sending domain must pass a delivery test before you can send campaigns")
-		return
-	}
-	var recipientCount int
-	err = s.db.QueryRow(r.Context(), `
-		SELECT count(*) FROM audience_members am
-		JOIN contacts c ON c.id = am.contact_id
-		WHERE am.audience_id = $1 AND c.unsubscribed = false
-	`, *c.AudienceID).Scan(&recipientCount)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not count campaign recipients")
-		return
-	}
-	if recipientCount == 0 {
-		httpx.Error(w, http.StatusUnprocessableEntity, "empty_audience", "This audience has no subscribed contacts")
-		return
-	}
-
-	tag, err := s.db.Exec(r.Context(), `
-		UPDATE campaigns SET status = 'scheduled', scheduled_at = $1, total_recipients = $2, updated_at = now()
-		WHERE id = $3 AND workspace_id = $4 AND status = 'draft'
-	`, scheduledAt, recipientCount, campaignID, workspaceID(r))
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not schedule the campaign")
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusConflict, "campaign_locked", "This campaign has already been scheduled or sent")
-		return
-	}
-	if err := s.queue.EnqueueCampaign(campaignID, scheduledAt); err != nil {
-		_, _ = s.db.Exec(r.Context(), `UPDATE campaigns SET status = 'draft', scheduled_at = NULL WHERE id = $1`, campaignID)
-		s.logger.Error("enqueue campaign", "error", err)
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not queue the campaign")
-		return
-	}
-	updated, _ := s.getCampaignByID(r, campaignID)
 	httpx.JSON(w, http.StatusOK, map[string]any{"campaign": updated})
 }
 

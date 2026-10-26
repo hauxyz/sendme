@@ -28,6 +28,7 @@ type sessionUser struct {
 	ID            string
 	Name          string
 	Email         string
+	IsAdmin       bool
 	WorkspaceID   string
 	WorkspaceName string
 }
@@ -47,12 +48,12 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 
 		var user sessionUser
 		err = s.db.QueryRow(r.Context(), `
-			SELECT u.id, u.name, u.email, w.id, w.name
+			SELECT u.id, u.name, u.email, u.is_admin, w.id, w.name
 			FROM users u
 			JOIN workspace_members m ON m.user_id = u.id
 			JOIN workspaces w ON w.id = m.workspace_id
 			WHERE u.id = $1 AND w.id = $2 AND u.session_version = $3
-		`, claims.UserID, claims.WorkspaceID, claims.SessionVersion).Scan(&user.ID, &user.Name, &user.Email, &user.WorkspaceID, &user.WorkspaceName)
+		`, claims.UserID, claims.WorkspaceID, claims.SessionVersion).Scan(&user.ID, &user.Name, &user.Email, &user.IsAdmin, &user.WorkspaceID, &user.WorkspaceName)
 		if err != nil {
 			httpx.Error(w, http.StatusUnauthorized, "unauthorized", "Your session is no longer valid")
 			return
@@ -120,6 +121,21 @@ func apiKeyID(r *http.Request) string {
 func currentUser(r *http.Request) *sessionUser {
 	value, _ := r.Context().Value(ctxUser).(*sessionUser)
 	return value
+}
+
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := currentUser(r)
+		if user == nil {
+			httpx.Error(w, http.StatusUnauthorized, "unauthorized", "You must be signed in")
+			return
+		}
+		if !user.IsAdmin {
+			httpx.Error(w, http.StatusForbidden, "forbidden", "Platform administrator access is required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) requestLogger(next http.Handler) http.Handler {

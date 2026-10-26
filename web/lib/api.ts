@@ -1,5 +1,5 @@
 export const PUBLIC_API_URL =
-  process.env.NEXT_PUBLIC_API_PUBLIC_URL?.replace(/\/$/, "") || "http://localhost:8080";
+  process.env.NEXT_PUBLIC_API_PUBLIC_URL?.replace(/\/$/, "") || "http://localhost:3000";
 
 export class ApiError extends Error {
   status: number;

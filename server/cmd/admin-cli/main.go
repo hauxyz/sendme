@@ -24,11 +24,15 @@ const usage = `SendMe admin CLI
 
 Usage:
   admin-cli create-admin --email EMAIL [--name NAME] [--workspace NAME]
+  admin-cli promote --email EMAIL
+  admin-cli demote --email EMAIL
   admin-cli reset-password --email EMAIL
   admin-cli help
 
 Commands:
-  create-admin    Create a workspace owner (admin) account.
+  create-admin    Create a workspace owner and platform administrator.
+  promote         Grant platform administrator access to an existing account.
+  demote          Revoke platform administrator access from an account.
   reset-password  Set a new password and revoke all existing sessions.
 
 Flags:
@@ -55,6 +59,10 @@ func main() {
 	switch os.Args[1] {
 	case "create-admin":
 		err = runCreateAdmin(ctx, os.Args[2:])
+	case "promote":
+		err = runSetAdmin(ctx, os.Args[2:], true)
+	case "demote":
+		err = runSetAdmin(ctx, os.Args[2:], false)
 	case "reset-password", "reset-pass":
 		err = runResetPassword(ctx, os.Args[2:])
 	case "help", "-h", "--help":
@@ -128,6 +136,53 @@ func runCreateAdmin(parent context.Context, args []string) error {
 	fmt.Printf("  Email:     %s\n", account.Email)
 	fmt.Printf("  Workspace: %s\n", account.WorkspaceName)
 	fmt.Printf("  Role:      owner\n")
+	fmt.Printf("  Platform admin: yes\n")
+	return nil
+}
+
+func runSetAdmin(parent context.Context, args []string, isAdmin bool) error {
+	action := "promote"
+	if !isAdmin {
+		action = "demote"
+	}
+	fs := flag.NewFlagSet(action, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	email := fs.String("email", "", "account email address (required)")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: admin-cli %s --email EMAIL\n\n", action)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*email) == "" {
+		fs.Usage()
+		return errors.New("--email is required")
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
+	defer cancel()
+	db, err := database.Open(ctx, config.DatabaseURL())
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer db.Close()
+
+	account, err := admin.New(db).SetAdmin(ctx, *email, isAdmin)
+	if err != nil {
+		if errors.Is(err, admin.ErrUserNotFound) {
+			return fmt.Errorf("%w; use create-admin to create it", err)
+		}
+		return err
+	}
+	if isAdmin {
+		fmt.Printf("Platform administrator access granted to %s.\n", account.Email)
+	} else {
+		fmt.Printf("Platform administrator access revoked from %s.\n", account.Email)
+	}
 	return nil
 }
 

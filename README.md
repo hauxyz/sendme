@@ -8,14 +8,14 @@ Use it as a transactional email API, a campaign sender, a contact manager, or a 
 
 - **Direct delivery or SMTP relay** — send from Go straight to each recipient's MX without installing an SMTP server, or connect any SMTP relay. Each domain stores its own mode, sender identity, TLS mode, authentication mode, and encrypted credentials.
 - **Multiple sending domains** — configure direct delivery, a local relay, Amazon SES, or any custom SMTP service per domain. Direct domains get a generated DKIM key and DNS guidance.
-- **Transactional API** — `POST /api/v1/emails` with a workspace API key, multiple recipients, scheduling, idempotency keys, tags-like custom headers, and open/click tracking.
+- **useSend-compatible API** — the public `/api/v1` API mirrors useSend request and response shapes for emails, domains, contact books, campaigns, and analytics. It is proxied same-origin through Next.js with workspace API keys, scheduling, idempotency keys, custom headers, and open/click tracking.
 - **Campaigns** — draft, preview, send immediately, schedule, cancel, and delete. Campaigns render per-contact template variables and add an unsubscribe footer automatically.
 - **Contacts and audiences** — create, search, filter, paginate, edit, delete, import CSV, and manage audience membership in bulk.
 - **Email log** — inspect rendered content, delivery status, attempts, tracking events, and retry failed messages.
 - **Webhooks** — subscribe to delivery and engagement events, sign deliveries with HMAC-SHA256, send test events, and review delivery history.
 - **API keys** — workspace-scoped bearer keys, shown in full once, with a per-key rate limit of 120 requests per minute.
 - **Analytics** — workspace overview with send, delivery, open, and click metrics.
-- **Admin CLI** — create workspace-owner accounts and reset passwords without the dashboard, with immediate session revocation.
+- **Platform administration** — platform administrators can list and manage every user and workspace, create accounts, reset passwords, transfer memberships, and promote other administrators from the dashboard. The `admin-cli` remains available for bootstrap and recovery.
 - **Single-binary backend** — the HTTP API and background worker (asynq + Redis) run in one Go process.
 
 ## Stack
@@ -41,7 +41,7 @@ make init          # creates .env with random JWT, encryption, and signing secre
 make up            # builds and starts Postgres, Redis, the API, and the dashboard
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and create the first account. The API is on [http://localhost:8080](http://localhost:8080); its health check is `GET /healthz`.
+Open [http://localhost:3000](http://localhost:3000) and create the first account. The public API is available on the same origin at [http://localhost:3000/api/v1](http://localhost:3000/api/v1). The Go backend also listens on `http://localhost:8080` for internal use, with its health check at `GET /healthz`.
 
 Database migrations run automatically when the API starts.
 
@@ -65,13 +65,15 @@ make dev           # API on :8080 and Next.js on :3000
 
 `make dev` runs the API with the worker enabled. Use `make api` and `make web` in separate terminals if you prefer. `make check` runs gofmt, `go vet`, backend tests, ESLint, and TypeScript.
 
-The frontend calls the API through the same-origin route `/api/proxy/*`. In development it forwards to `http://localhost:8080`; in Docker it forwards to `http://server:8080`. Override the target with `API_INTERNAL_URL`.
+The frontend calls the API through the same-origin route `/api/proxy/*`. The public useSend-compatible API is exposed through `/api/v1/*`; both proxies forward to the Go backend. In development the target is `http://localhost:8080`; in Docker it is `http://server:8080`. Override it with `API_INTERNAL_URL`.
 
 ## Admin CLI
 
-Account administration runs outside the dashboard. Use `admin-cli` to create the first owner account or reset a forgotten password. Interactive passwords are prompted without echo and are never printed.
+Platform administrators get an **Administration** section in the dashboard after signing in. They can manage every account and workspace, including creating users, resetting passwords, editing membership, and promoting or demoting other platform administrators.
 
-Create a workspace owner (the account has full admin access to its workspace):
+Use `admin-cli` for the first account or for recovery when nobody can sign in. Interactive passwords are prompted without echo and are never printed.
+
+Create a workspace owner and platform administrator:
 
 ```bash
 docker compose exec server admin-cli create-admin \
@@ -90,6 +92,13 @@ For local development, use `make admin-cli ARGS='...'` or run `server/bin/admin-
 
 ```bash
 printf '%s\n' "$NEW_PASSWORD" | docker compose exec -T server admin-cli reset-password --email admin@example.com
+```
+
+Grant or revoke platform administrator access for an existing account:
+
+```bash
+docker compose exec server admin-cli promote --email admin@example.com
+docker compose exec server admin-cli demote --email admin@example.com
 ```
 
 `create-admin` fails if the email is already registered; use `reset-password` for existing accounts. The CLI reads `DATABASE_URL` from the environment or `.env`. If a password is supplied with `--password`, it may be visible in shell history and process listings, so interactive input is preferred.
@@ -117,7 +126,7 @@ Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The ba
 | `WORKER_CONCURRENCY` | `10` | Worker concurrency. |
 | `MAIL_HELO_HOST` | sender domain | EHLO hostname for direct delivery. Set it to a hostname whose PTR record points at the server's public IP. |
 | `MAIL_PUBLIC_IP` | empty | Optional public IPv4/IPv6 address used to display the exact SPF record in DNS diagnostics. |
-| `NEXT_PUBLIC_API_PUBLIC_URL` | `http://localhost:8080` | Public API origin shown in the dashboard and API reference. Baked in at web build time. |
+| `NEXT_PUBLIC_API_PUBLIC_URL` | `http://localhost:3000` | Public web origin shown in the dashboard and API reference. The API lives at `<origin>/api/v1`. Baked in at web build time. |
 | `API_INTERNAL_URL` | `http://localhost:8080` | Server-side proxy target used by Next.js. |
 
 Generate secrets with:
@@ -163,38 +172,52 @@ Presets for provider settings are UI conveniences only. SendMe does not call Ama
 
 ## Send with the API
 
-Create a key under **API keys**, then:
+Create a key under **API keys**, then call the same-origin useSend-compatible API:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/emails \
+curl -X POST http://localhost:3000/api/v1/emails \
   -H "Authorization: Bearer sm_live_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: welcome-42" \
   -d '{
-    "to": "customer@example.com",
-    "domain": "example.com",
     "from": "Acme <hello@example.com>",
+    "to": "customer@example.com",
     "subject": "Welcome to Acme",
     "html": "<h1>Hello</h1><p>Your account is ready.</p>",
     "text": "Hello, your account is ready.",
-    "track_opens": true,
-    "track_clicks": true
+    "trackOpens": true,
+    "trackClicks": true
   }'
 ```
 
-The response contains the email `id` (and `ids` for batch sends). Other public endpoints:
+The response is `{ "emailId": "..." }`. Multi-recipient and batch requests may also include `emailIds`. The API resolves the active sending domain from the `from` address.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/me` | Resolve the workspace for the current key. |
-| `GET` | `/api/v1/domains` | List active domains. |
+| `GET` | `/api/v1/domains` | List sending domains. |
+| `POST` | `/api/v1/domains` | Create a direct-delivery domain. |
+| `GET` | `/api/v1/domains/{id}` | Get one domain. |
+| `PUT` | `/api/v1/domains/{id}/verify` | Re-run domain verification. |
+| `DELETE` | `/api/v1/domains/{id}` | Delete a domain. |
 | `POST` | `/api/v1/emails` | Send or schedule up to 50 recipients. |
-| `GET` | `/api/v1/emails` | List emails. |
+| `POST` | `/api/v1/emails/batch` | Send up to 100 email requests. |
+| `GET` | `/api/v1/emails` | List emails with pagination and date filters. |
 | `GET` | `/api/v1/emails/{id}` | Retrieve one email, including events. |
-| `POST` | `/api/v1/contacts` | Upsert a contact, optionally into an audience. |
-| `GET` | `/api/v1/audiences` | List audiences. |
+| `PATCH` | `/api/v1/emails/{id}` | Reschedule a queued email. |
+| `POST` | `/api/v1/emails/{id}/cancel` | Cancel a queued email. |
+| `GET/POST` | `/api/v1/contactBooks` | List or create contact books. |
+| `GET/PATCH/DELETE` | `/api/v1/contactBooks/{id}` | Manage a contact book. |
+| `GET/POST` | `/api/v1/contactBooks/{id}/contacts` | List or upsert contacts. |
+| `PATCH/PUT/DELETE` | `/api/v1/contactBooks/{id}/contacts/{contactId}` | Manage one contact. |
+| `POST/DELETE` | `/api/v1/contactBooks/{id}/contacts/bulk` | Bulk add or remove contacts. |
+| `GET/POST` | `/api/v1/campaigns` | List or create campaigns from a contact book. |
+| `GET/DELETE` | `/api/v1/campaigns/{id}` | Retrieve or delete a campaign. |
+| `POST` | `/api/v1/campaigns/{id}/schedule` | Schedule a draft campaign. |
+| `GET` | `/api/v1/analytics/email-time-series` | Daily send, delivery, open, and click totals. |
+| `GET` | `/api/v1/analytics/reputation-metrics` | Delivery and bounce rates. |
 
-See **API reference** in the dashboard for request and response details, error codes, and rate limits.
+useSend features that SendMe does not implement yet return an explicit `400` or `501` instead of being silently ignored. This currently includes email templates and variables, attachments, CC/BCC recipients, campaign batching, and campaign pause/resume. See **API reference** in the dashboard for payloads, error codes, and rate limits.
 
 ## Webhooks
 
@@ -253,11 +276,11 @@ Unsubscribe links mark the contact as unsubscribed and render a small confirmati
 
 ## Production notes
 
-- Put both services behind a TLS reverse proxy. Set `APP_URL` and `API_PUBLIC_URL` to the HTTPS origins, set `TRUSTED_ORIGINS` if the dashboard uses another origin, and leave `COOKIE_SECURE` empty for automatic detection or set it to `true`.
+- Put both services behind a TLS reverse proxy. Set `APP_URL` and `NEXT_PUBLIC_API_PUBLIC_URL` to the dashboard HTTPS origin, keep `API_PUBLIC_URL` on the backend origin used for tracking links, set `TRUSTED_ORIGINS` if the dashboard uses another origin, and leave `COOKIE_SECURE` empty for automatic detection or set it to `true`.
 - Generate fresh secrets. Never reuse the example values, and keep `.env` out of version control.
 - `ENCRYPTION_KEY` must decode to exactly 32 bytes. Changing it makes existing SMTP passwords and direct-delivery DKIM keys unreadable.
 - Back up PostgreSQL and the Redis append-only file. Redis holds queued sends and rate-limit counters; Postgres holds all durable state.
-- `NEXT_PUBLIC_API_PUBLIC_URL` is compiled into the dashboard. Set it before building the web image, for example with `API_PUBLIC_URL=https://mail.example.com docker compose build web`.
+- `NEXT_PUBLIC_API_PUBLIC_URL` is compiled into the dashboard and should be the public web origin, not the Go API origin. Set it before building the web image, for example with `NEXT_PUBLIC_API_PUBLIC_URL=https://mail.example.com docker compose build web`.
 - For direct delivery, allow outbound TCP 25, set `MAIL_HELO_HOST` to a hostname with matching PTR, and publish SPF/DKIM/DMARC. A relay is the better choice when port 25 is blocked or you need managed IP reputation.
 - When using an SMTP relay, SendMe trusts that relay. Use one that handles DKIM signing and outbound reputation.
 - Rate limiting is per API key in Redis (120 requests/minute). Add a reverse-proxy limit for unauthenticated endpoints if the API is publicly reachable.

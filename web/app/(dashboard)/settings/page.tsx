@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Building2, Check, KeyRound, LockKeyhole, ShieldCheck, User } from "lucide-react";
+import { BookOpen, Building2, Check, Eye, EyeOff, KeyRound, LockKeyhole, ShieldCheck, User } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, PUBLIC_API_URL } from "@/lib/api";
@@ -59,7 +59,7 @@ function SettingsContent({
                 <dd className="mt-1 break-all font-mono text-[10.5px] text-zinc-500">{session.workspace.id}</dd>
               </div>
               <div>
-                <dt className="text-[10px] uppercase tracking-[0.08em] text-zinc-600">API base URL</dt>
+                <dt className="text-[10px] uppercase tracking-[0.08em] text-zinc-600">Public API base URL</dt>
                 <dd className="mt-1 break-all font-mono text-[10.5px] text-zinc-500">{PUBLIC_API_URL}/api/v1</dd>
               </div>
             </dl>
@@ -71,7 +71,7 @@ function SettingsContent({
             </div>
             <h2 className="mt-3 text-sm font-semibold text-zinc-100">Need help?</h2>
             <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-              Review the API reference for sending email, managing contacts and verifying webhooks.
+              Review the API reference for sending email, managing contacts, campaigns and webhooks.
             </p>
             <div className="mt-3 flex flex-col gap-2">
               <Link href="/docs">
@@ -270,39 +270,30 @@ function PasswordForm() {
               {error}
             </div>
           ) : null}
-          <Field label="Current password" htmlFor="current-password">
-            <Input
-              id="current-password"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              required
-            />
-          </Field>
+          <PasswordField
+            id="current-password"
+            label="Current password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+          />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="New password" htmlFor="new-password">
-              <Input
-                id="new-password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Confirm new password" htmlFor="confirm-password">
-              <Input
-                id="confirm-password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                required
-              />
-            </Field>
+            <PasswordField
+              id="new-password"
+              label="New password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={setNewPassword}
+              minLength={8}
+            />
+            <PasswordField
+              id="confirm-password"
+              label="Confirm new password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+              minLength={8}
+            />
           </div>
           <div className="flex items-start gap-2 rounded-lg border border-[#26262b] bg-[#0b0b0e] px-3 py-2.5 text-[11px] leading-relaxed text-zinc-600">
             <LockKeyhole className="mt-0.5 size-3.5 shrink-0 text-zinc-700" />
@@ -320,5 +311,49 @@ function PasswordForm() {
         </div>
       </form>
     </Card>
+  );
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  onChange,
+  autoComplete,
+  minLength,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  minLength?: number;
+}) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <Field label={label} htmlFor={id}>
+      <div className="relative">
+        <Input
+          id={id}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          minLength={minLength}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="pr-10"
+          required
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((current) => !current)}
+          aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          aria-pressed={visible}
+          className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-zinc-600 outline-none transition hover:bg-white/[0.06] hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-violet-500/50"
+        >
+          {visible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        </button>
+      </div>
+    </Field>
   );
 }

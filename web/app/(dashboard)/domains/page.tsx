@@ -1,13 +1,13 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Clock, Globe, KeyRound, Mail, Pencil, Plus, RefreshCw, Server, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Clock, Copy, Globe, KeyRound, Mail, Pencil, Plus, RefreshCw, Server, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import { useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { api, ApiError, fetcher } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { DNSResult, Domain } from "@/lib/types";
-import { cn, formatRelative } from "@/lib/utils";
+import { cn, copyToClipboard, formatRelative } from "@/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { StatusBadge } from "@/components/status-badge";
 
 export default function DomainsPage() {
   const { session } = useSession();
-  const { data, isLoading, mutate } = useSWR<{ domains: Domain[] }>("/domains", fetcher);
+  const { data, error, isLoading, mutate } = useSWR<{ domains: Domain[] }>("/domains", fetcher);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Domain | null>(null);
   const [testing, setTesting] = useState<Domain | null>(null);
@@ -94,6 +94,20 @@ export default function DomainsPage() {
           {Array.from({ length: 2 }).map((_, index) => (
             <div key={index} className="h-64 animate-pulse rounded-xl border border-[#232327] bg-[#0f0f12]" />
           ))}
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-[#232327] bg-[#0f0f12]">
+          <EmptyState
+            icon={<RefreshCw className="size-5" />}
+            title="Couldn't load domains"
+            description={error instanceof ApiError ? error.message : "There was a problem reaching the API. Try again."}
+            action={
+              <Button variant="secondary" onClick={() => mutate()}>
+                <RefreshCw className="size-3.5" />
+                Try again
+              </Button>
+            }
+          />
         </div>
       ) : domains.length === 0 ? (
         <div className="rounded-xl border border-[#232327] bg-[#0f0f12]">
@@ -773,10 +787,38 @@ function TestDomainModal({
   );
 }
 
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await copyToClipboard(value);
+      setCopied(true);
+      toast.success("Copied to clipboard");
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={label}
+      title={copied ? "Copied" : label}
+      className="flex size-6 shrink-0 items-center justify-center rounded text-zinc-600 outline-none transition hover:bg-white/[0.06] hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-violet-500/50"
+    >
+      {copied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
+
 function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => void }) {
-  const { data, error, isLoading } = useSWR<DNSResult>(
+  const { data, error, isLoading, isValidating, mutate } = useSWR<DNSResult>(
     domain ? `/domains/${domain.id}/dns` : null,
     fetcher,
+    { revalidateOnFocus: false },
   );
 
   return (
@@ -784,9 +826,17 @@ function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => v
       open={Boolean(domain)}
       onClose={onClose}
       title="DNS diagnostics"
-      description={`Optional deliverability checks for ${domain?.name || ""}.`}
+      description={`Live deliverability checks for ${domain?.name || ""}. Records can take up to 48 hours to propagate.`}
       size="lg"
-      footer={<Button variant="ghost" onClick={onClose}>Close</Button>}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+          <Button variant="secondary" onClick={() => mutate()} loading={isValidating} disabled={!domain}>
+            <RefreshCw className="size-3.5" />
+            Recheck DNS
+          </Button>
+        </>
+      }
     >
       {isLoading ? (
         <div className="space-y-3">
@@ -795,13 +845,15 @@ function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => v
           ))}
         </div>
       ) : error ? (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.07] px-4 py-3 text-[13px] text-rose-300">
-          Could not run DNS checks.
+        <div role="alert" className="rounded-lg border border-rose-500/20 bg-rose-500/[0.07] px-4 py-4">
+          <p className="text-[13px] font-medium text-rose-200">Could not run DNS checks</p>
+          <p className="mt-1 text-[12px] text-rose-300/70">{error instanceof ApiError ? error.message : "Check the API connection and try again."}</p>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={() => mutate()}>Try again</Button>
         </div>
       ) : data ? (
         <div className="space-y-3">
           {data.checks.map((check) => (
-            <div key={check.type} className="rounded-lg border border-[#26262b] bg-[#0b0b0e] p-4">
+            <div key={`${check.type}-${check.name}`} className="rounded-lg border border-[#26262b] bg-[#0b0b0e] p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
@@ -823,18 +875,24 @@ function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => v
               {check.values && check.values.length > 0 ? (
                 <div className="mt-2 space-y-1">
                   {check.values.map((value) => (
-                    <p key={value} className="break-all rounded bg-black/30 px-2 py-1.5 font-mono text-[10.5px] text-zinc-400">
-                      {value}
-                    </p>
+                    <div key={value} className="flex items-start gap-2 rounded bg-black/30 px-2 py-1.5">
+                      <p className="min-w-0 flex-1 break-all font-mono text-[10.5px] text-zinc-400">
+                        {value}
+                      </p>
+                      <CopyButton value={value} label={`Copy ${check.type} value`} />
+                    </div>
                   ))}
                 </div>
               ) : null}
               {check.recommended ? (
                 <div className="mt-2 rounded border border-emerald-500/10 bg-emerald-500/[0.03] px-2 py-1.5">
                   <p className="text-[9px] uppercase tracking-[0.08em] text-emerald-500/70">Recommended</p>
-                  <p className="mt-1 break-all font-mono text-[10.5px] leading-relaxed text-emerald-200/70">
-                    {check.recommended}
-                  </p>
+                  <div className="mt-1 flex items-start gap-2">
+                    <p className="min-w-0 flex-1 break-all font-mono text-[10.5px] leading-relaxed text-emerald-200/70">
+                      {check.recommended}
+                    </p>
+                    <CopyButton value={check.recommended} label="Copy recommended value" />
+                  </div>
                 </div>
               ) : null}
             </div>

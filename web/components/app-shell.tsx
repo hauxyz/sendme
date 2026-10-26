@@ -13,13 +13,15 @@ import {
   Megaphone,
   Menu,
   Settings,
+  ShieldCheck,
   Users,
   Webhook,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 import { cn, initials } from "@/lib/utils";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,8 @@ const developerNav = [
   { href: "/docs", label: "API reference", icon: BookOpen },
 ];
 
+const adminNav = [{ href: "/admin", label: "Platform admin", icon: ShieldCheck }];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -45,6 +49,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileNavRef = useRef<HTMLElement>(null);
+  const accountMenuId = useId();
+
+  useFocusTrap(mobileOpen, mobileNavRef, { onEscape: () => setMobileOpen(false) });
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -53,8 +62,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setAccountOpen(false);
       }
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setAccountOpen(false);
+      accountButtonRef.current?.focus({ preventScroll: true });
+    };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [accountOpen]);
 
   useEffect(() => {
@@ -113,7 +131,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
         <button
           type="button"
-          className="rounded-lg p-1.5 text-zinc-500 hover:bg-white/5 hover:text-zinc-200 lg:hidden"
+          data-autofocus
+          className="rounded-lg p-1.5 text-zinc-500 outline-none transition hover:bg-white/5 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-violet-500/60 lg:hidden"
           onClick={() => setMobileOpen(false)}
           aria-label="Close navigation"
         >
@@ -133,7 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      <nav className="mt-6 flex-1 space-y-6 overflow-y-auto px-3 pb-6">
+      <nav aria-label="Primary navigation" className="mt-6 flex-1 space-y-6 overflow-y-auto px-3 pb-6">
         <div className="space-y-1">
           {primaryNav.map((item) => (
             <NavItem key={item.href} {...item} pathname={pathname} />
@@ -149,15 +168,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ))}
           </div>
         </div>
+        {session.user.is_admin ? (
+          <div>
+            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+              Administration
+            </p>
+            <div className="space-y-1">
+              {adminNav.map((item) => (
+                <NavItem key={item.href} {...item} pathname={pathname} />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </nav>
 
       <div className="p-3" ref={accountRef}>
         <div className="relative">
           <button
+            ref={accountButtonRef}
             type="button"
+            aria-expanded={accountOpen}
+            aria-controls={accountMenuId}
             onClick={() => setAccountOpen((open) => !open)}
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-left transition hover:border-[#26262b] hover:bg-white/[0.03]",
+              "flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 text-left outline-none transition hover:border-[#26262b] hover:bg-white/[0.03] focus-visible:border-violet-500/50 focus-visible:ring-2 focus-visible:ring-violet-500/40",
               accountOpen && "border-[#26262b] bg-white/[0.03]",
             )}
           >
@@ -172,11 +206,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
 
           {accountOpen ? (
-            <div className="animate-fade-in absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-lg border border-[#2a2a2f] bg-[#141417] p-1 shadow-2xl">
+            <div
+              id={accountMenuId}
+              className="animate-fade-in absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-lg border border-[#2a2a2f] bg-[#141417] p-1 shadow-2xl"
+            >
               <Link
                 href="/settings"
                 onClick={() => setAccountOpen(false)}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-zinc-300 hover:bg-white/[0.05]"
+                className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-zinc-300 outline-none hover:bg-white/[0.05] focus-visible:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-violet-500/50"
               >
                 <Settings className="size-3.5 text-zinc-500" />
                 Settings
@@ -184,7 +221,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={logout}
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-zinc-400 outline-none hover:bg-white/[0.05] hover:text-zinc-200 focus-visible:bg-white/[0.06] focus-visible:ring-2 focus-visible:ring-violet-500/50"
               >
                 <LogOut className="size-3.5 text-zinc-500" />
                 Sign out
@@ -198,6 +235,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#08080a]">
+      <a
+        href="#main-content"
+        className="fixed left-4 top-4 z-[100] -translate-y-20 rounded-lg bg-violet-500 px-4 py-2 text-sm font-medium text-white opacity-0 shadow-lg transition focus:translate-y-0 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+      >
+        Skip to content
+      </a>
+
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] border-r border-[#1c1c20] bg-[#0b0b0e] lg:block">
         {sidebar}
       </aside>
@@ -206,12 +250,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             type="button"
+            tabIndex={-1}
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={() => setMobileOpen(false)}
             aria-label="Close navigation"
           />
           <aside
-            className="animate-fade-in absolute inset-y-0 left-0 w-[280px] border-r border-[#1c1c20] bg-[#0b0b0e]"
+            ref={mobileNavRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            tabIndex={-1}
+            className="animate-fade-in absolute inset-y-0 left-0 w-[280px] border-r border-[#1c1c20] bg-[#0b0b0e] outline-none"
             onClick={(event) => {
               if ((event.target as HTMLElement).closest("a")) setMobileOpen(false);
             }}
@@ -226,15 +276,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-zinc-100"
+            className="rounded-lg p-2 text-zinc-400 outline-none transition hover:bg-white/5 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-violet-500/60"
             aria-label="Open navigation"
+            aria-expanded={mobileOpen}
           >
             <Menu className="size-5" />
           </button>
           <Logo compact />
           <div className="w-9" />
         </div>
-        <main className="relative min-h-screen">
+        <main id="main-content" tabIndex={-1} className="relative min-h-screen scroll-mt-20 outline-none">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-[320px] bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(139,92,246,0.045),transparent_80%)]" />
           <div className="relative mx-auto w-full max-w-[1440px] px-5 py-8 lg:px-10 lg:py-10">{children}</div>
         </main>
@@ -258,8 +309,9 @@ function NavItem({
   return (
     <Link
       href={href}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition",
+        "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-violet-500/50",
         active ? "bg-white/[0.06] text-zinc-100" : "text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-200",
       )}
     >
