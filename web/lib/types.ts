@@ -15,6 +15,8 @@ export type Domain = {
   smtp_auth: "none" | "plain" | "login";
   smtp_username: string;
   has_password: boolean;
+  delivery_mode: "direct" | "smtp";
+  dkim_selector: string;
   status: "pending" | "active" | "error";
   last_error: string;
   last_tested_at: string | null;
@@ -32,6 +34,7 @@ export type DNSResult = {
     found: boolean;
     values: string[] | null;
     description: string;
+    recommended?: string;
   }[];
   checked_at: string;
   note: string;

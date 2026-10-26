@@ -129,7 +129,7 @@ export default function EmailsPage() {
             description={
               search
                 ? "Try a different search term or clear the filters."
-                : "Send your first email through your own SMTP server. It will appear here once queued."
+                : "Send your first email through a verified domain. It will appear here once queued."
             }
             action={
               <Link href="/emails/new">

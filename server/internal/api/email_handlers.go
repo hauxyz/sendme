@@ -343,7 +343,7 @@ func (s *Server) sendDashboardEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if d.Status != "active" {
-		httpx.Error(w, http.StatusUnprocessableEntity, "domain_not_active", "Test the SMTP configuration for this domain before sending")
+		httpx.Error(w, http.StatusUnprocessableEntity, "domain_not_active", "Test the delivery configuration for this domain before sending")
 		return
 	}
 	trackOpens := true
@@ -598,7 +598,7 @@ func (s *Server) resolveSendingDomain(r *http.Request, workspace, domainName, do
 		return &domains[0], nil
 	}
 	if len(domains) == 0 {
-		return nil, fmt.Errorf("no active sending domain found. Add a domain and test its SMTP configuration first")
+		return nil, fmt.Errorf("no active sending domain found. Add a domain and test its delivery configuration first")
 	}
 	return nil, fmt.Errorf("specify a sending domain using the from or domain field")
 }
@@ -647,7 +647,7 @@ func (s *Server) v1Me(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) v1Domains(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(r.Context(), `
-		SELECT id, name, from_name, from_email, status, last_tested_at
+		SELECT id, name, from_name, from_email, delivery_mode, status, last_tested_at
 		FROM domains WHERE workspace_id = $1 ORDER BY created_at ASC
 	`, workspaceID(r))
 	if err != nil {
@@ -660,13 +660,14 @@ func (s *Server) v1Domains(w http.ResponseWriter, r *http.Request) {
 		Name         string     `json:"name"`
 		FromName     string     `json:"from_name"`
 		FromEmail    string     `json:"from_email"`
+		DeliveryMode string     `json:"delivery_mode"`
 		Status       string     `json:"status"`
 		LastTestedAt *time.Time `json:"last_tested_at"`
 	}
 	domains := make([]domain, 0)
 	for rows.Next() {
 		var d domain
-		if err := rows.Scan(&d.ID, &d.Name, &d.FromName, &d.FromEmail, &d.Status, &d.LastTestedAt); err == nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.FromName, &d.FromEmail, &d.DeliveryMode, &d.Status, &d.LastTestedAt); err == nil {
 			domains = append(domains, d)
 		}
 	}

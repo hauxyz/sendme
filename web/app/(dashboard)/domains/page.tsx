@@ -55,7 +55,7 @@ export default function DomainsPage() {
     <div>
       <PageHeader
         title="Domains"
-        description="Connect unlimited sending domains to your own SMTP servers. Credentials are encrypted at rest."
+        description="Add unlimited sending domains and send directly from Go or through any SMTP relay. Credentials are encrypted at rest."
         actions={
           <Button onClick={openCreate}>
             <Plus className="size-4" />
@@ -70,10 +70,10 @@ export default function DomainsPage() {
             <Server className="size-4 text-violet-300" />
           </div>
           <div>
-            <p className="text-[13px] font-medium text-zinc-200">SMTP only. No third-party providers.</p>
+            <p className="text-[13px] font-medium text-zinc-200">Direct delivery or your own SMTP relay. No sending APIs.</p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500">
-              Each domain has its own SMTP host, credentials and sender identity. SendMe connects
-              directly to your mail server.
+              Use built-in direct-to-MX delivery without an SMTP server, or connect a local relay,
+              Amazon SES, and other SMTP services. Each domain keeps its own sender identity.
             </p>
           </div>
         </div>
@@ -100,7 +100,7 @@ export default function DomainsPage() {
           <EmptyState
             icon={<Globe className="size-5" />}
             title="Add your first sending domain"
-            description="Point SendMe at any SMTP server. We'll run a test email to verify the connection."
+            description="Use built-in direct delivery or connect any SMTP relay. We'll send a real test email to verify it."
             action={
               <Button onClick={openCreate}>
                 <Plus className="size-4" />
@@ -137,11 +137,17 @@ export default function DomainsPage() {
                 </div>
 
                 <div className="mt-5 space-y-2.5">
-                  <InfoRow icon={Server} label="SMTP server" value={`${domain.smtp_host}:${domain.smtp_port}`} />
+                  <InfoRow
+                    icon={Server}
+                    label={domain.delivery_mode === "direct" ? "Delivery" : "SMTP relay"}
+                    value={domain.delivery_mode === "direct" ? "Direct to recipient MX" : `${domain.smtp_host}:${domain.smtp_port}`}
+                  />
                   <InfoRow
                     icon={ShieldCheck}
                     label="Security"
-                    value={`${domain.smtp_security === "starttls" ? "STARTTLS" : domain.smtp_security === "tls" ? "TLS" : "None"} · ${domain.smtp_auth === "none" ? "No auth" : domain.smtp_auth.toUpperCase()}`}
+                    value={domain.delivery_mode === "direct"
+                      ? "Port 25 · Opportunistic TLS"
+                      : `${domain.smtp_security === "starttls" ? "STARTTLS" : domain.smtp_security === "tls" ? "TLS" : "None"} · ${domain.smtp_auth === "none" ? "No auth" : domain.smtp_auth.toUpperCase()}`}
                   />
                   <InfoRow
                     icon={Clock}
@@ -163,7 +169,7 @@ export default function DomainsPage() {
               <div className="mt-auto flex items-center gap-1 border-t border-[#1e1e22] p-2.5">
                 <Button variant="ghost" size="sm" onClick={() => setTesting(domain)}>
                   <RefreshCw className="size-3.5" />
-                  Test SMTP
+                  Test delivery
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => openEdit(domain)}>
                   <Pencil className="size-3.5" />
@@ -191,7 +197,7 @@ export default function DomainsPage() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         title={editing ? "Edit domain" : "Add sending domain"}
-        description="Configure the sender identity and SMTP credentials for this domain."
+        description="Choose built-in direct delivery or an SMTP relay, then configure the sender identity."
         size="xl"
       >
         <DomainForm
@@ -221,7 +227,7 @@ export default function DomainsPage() {
         open={Boolean(deleting)}
         onClose={() => setDeleting(null)}
         title="Delete domain?"
-        description={`This removes ${deleting?.name || "the domain"} and its SMTP credentials. Existing email history is preserved.`}
+        description={`This removes ${deleting?.name || "the domain"} and its delivery settings and DKIM key. Existing email history is preserved.`}
         footer={
           <>
             <Button variant="ghost" onClick={() => setDeleting(null)}>
@@ -265,6 +271,8 @@ type FormState = {
   from_name: string;
   from_email: string;
   reply_to: string;
+  delivery_mode: "direct" | "smtp";
+  provider: DeliveryProvider;
   smtp_host: string;
   smtp_port: string;
   smtp_security: string;
@@ -272,6 +280,101 @@ type FormState = {
   smtp_username: string;
   smtp_password: string;
 };
+
+type DeliveryProvider = "direct" | "local" | "ses" | "gmail" | "mailgun" | "sendgrid" | "postmark" | "custom";
+
+type ProviderPreset = {
+  label: string;
+  mode: "direct" | "smtp";
+  host?: string;
+  port?: string;
+  security?: string;
+  auth?: string;
+  username?: string;
+  info: string;
+};
+
+const PROVIDERS: Record<DeliveryProvider, ProviderPreset> = {
+  direct: {
+    label: "Built-in direct delivery (no SMTP server)",
+    mode: "direct",
+    info: "SendMe resolves each recipient's MX in Go and delivers on port 25 with opportunistic STARTTLS. No relay is installed. You still need outbound port 25, SPF/DKIM/DMARC, and a public IP with a PTR record.",
+  },
+  local: {
+    label: "Local SMTP relay",
+    mode: "smtp",
+    host: "host.docker.internal",
+    port: "25",
+    security: "none",
+    auth: "none",
+    info: "Connect a relay running on the machine that hosts Docker. host.docker.internal points to the host; the relay must listen on an interface the container can reach. Most local relays use plain SMTP on port 25 with no auth.",
+  },
+  ses: {
+    label: "Amazon SES (SMTP)",
+    mode: "smtp",
+    host: "email-smtp.us-east-1.amazonaws.com",
+    port: "587",
+    security: "starttls",
+    auth: "plain",
+    info: "Amazon SES is the email service; Amazon SNS is for notifications and cannot send SMTP email. Use SES SMTP credentials, not IAM access keys, and replace us-east-1 with your SES region.",
+  },
+  gmail: {
+    label: "Gmail / Google Workspace",
+    mode: "smtp",
+    host: "smtp.gmail.com",
+    port: "587",
+    security: "starttls",
+    auth: "plain",
+    info: "Use a Google app password for the SMTP password. Regular account passwords are rejected.",
+  },
+  mailgun: {
+    label: "Mailgun",
+    mode: "smtp",
+    host: "smtp.mailgun.org",
+    port: "587",
+    security: "starttls",
+    auth: "plain",
+    info: "Use the SMTP credentials shown in the Mailgun domain settings.",
+  },
+  sendgrid: {
+    label: "SendGrid",
+    mode: "smtp",
+    host: "smtp.sendgrid.net",
+    port: "587",
+    security: "starttls",
+    auth: "plain",
+    username: "apikey",
+    info: "The username is apikey and the password is a SendGrid API key with mail sending permission.",
+  },
+  postmark: {
+    label: "Postmark",
+    mode: "smtp",
+    host: "smtp.postmarkapp.com",
+    port: "587",
+    security: "starttls",
+    auth: "plain",
+    info: "Use the SMTP token as the password. Your Postmark account must have a verified sender signature or domain.",
+  },
+  custom: {
+    label: "Custom SMTP relay",
+    mode: "smtp",
+    info: "Use the host, port, security, and credentials from your SMTP provider. Credentials are encrypted with AES-256-GCM before being stored.",
+  },
+};
+
+const PROVIDER_ORDER: DeliveryProvider[] = ["direct", "local", "ses", "gmail", "mailgun", "sendgrid", "postmark", "custom"];
+
+function providerFor(domain: Domain | null): DeliveryProvider {
+  if (!domain || domain.delivery_mode === "direct") return "direct";
+  const host = domain.smtp_host.toLowerCase();
+  if (host === "host.docker.internal" || host === "localhost" || host === "127.0.0.1") return "local";
+  if (host.startsWith("email-smtp.") && host.endsWith(".amazonaws.com")) return "ses";
+  if (host === "smtp.gmail.com" || host === "smtp.googlemail.com") return "gmail";
+  if (host === "smtp.mailgun.org" || host.endsWith(".mailgun.org")) return "mailgun";
+  if (host === "smtp.sendgrid.net") return "sendgrid";
+  if (host === "smtp.postmarkapp.com") return "postmark";
+  return "custom";
+}
 
 function DomainForm({
   domain,
@@ -287,6 +390,8 @@ function DomainForm({
     from_name: domain?.from_name || "",
     from_email: domain?.from_email || "",
     reply_to: domain?.reply_to || "",
+    delivery_mode: domain?.delivery_mode || "direct",
+    provider: providerFor(domain),
     smtp_host: domain?.smtp_host || "",
     smtp_port: String(domain?.smtp_port || 587),
     smtp_security: domain?.smtp_security || "starttls",
@@ -298,6 +403,22 @@ function DomainForm({
   const [error, setError] = useState("");
 
   const update = (key: keyof FormState, value: string) => {
+    if (key === "provider") {
+      const provider = value as DeliveryProvider;
+      const preset = PROVIDERS[provider];
+      setForm((current) => ({
+        ...current,
+        provider,
+        delivery_mode: preset.mode,
+        smtp_host: preset.host ?? (provider === "custom" ? current.smtp_host : ""),
+        smtp_port: preset.port ?? (provider === "custom" ? current.smtp_port : "587"),
+        smtp_security: preset.security ?? (provider === "custom" ? current.smtp_security : "starttls"),
+        smtp_auth: preset.auth ?? (provider === "custom" ? current.smtp_auth : "plain"),
+        smtp_username: preset.username ?? "",
+        smtp_password: "",
+      }));
+      return;
+    }
     setForm((current) => {
       const next = { ...current, [key]: value };
       if (key === "name") {
@@ -324,20 +445,23 @@ function DomainForm({
         from_name: form.from_name.trim(),
         from_email: form.from_email.trim(),
         reply_to: form.reply_to.trim(),
-        smtp_host: form.smtp_host.trim(),
-        smtp_port: Number(form.smtp_port),
-        smtp_security: form.smtp_security,
-        smtp_auth: form.smtp_auth,
-        smtp_username: form.smtp_username.trim(),
+        delivery_mode: form.delivery_mode,
       };
-      if (form.smtp_password) payload.smtp_password = form.smtp_password;
+      if (form.delivery_mode === "smtp") {
+        payload.smtp_host = form.smtp_host.trim();
+        payload.smtp_port = Number(form.smtp_port);
+        payload.smtp_security = form.smtp_security;
+        payload.smtp_auth = form.smtp_auth;
+        payload.smtp_username = form.smtp_username.trim();
+        if (form.smtp_password) payload.smtp_password = form.smtp_password;
+      }
       if (domain) {
         await api(`/domains/${domain.id}`, { method: "PATCH", body: payload });
         toast.success("Domain updated");
       } else {
-        payload.smtp_password = form.smtp_password;
+        if (form.delivery_mode === "smtp") payload.smtp_password = form.smtp_password;
         await api("/domains", { method: "POST", body: payload });
-        toast.success("Domain added. Run an SMTP test to activate it.");
+        toast.success("Domain added. Send a test delivery to activate it.");
       }
       await onSaved();
     } catch (err) {
@@ -405,89 +529,121 @@ function DomainForm({
 
       <section>
         <h3 className="mb-3 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
-          <Server className="size-3.5" /> SMTP connection
+          <Server className="size-3.5" /> Delivery
         </h3>
-        <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
-          <Field label="SMTP host" htmlFor="smtp-host">
-            <Input
-              id="smtp-host"
-              placeholder="smtp.example.com"
-              value={form.smtp_host}
-              onChange={(event) => update("smtp_host", event.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Port" htmlFor="smtp-port">
-            <Input
-              id="smtp-port"
-              type="number"
-              min={1}
-              max={65535}
-              value={form.smtp_port}
-              onChange={(event) => update("smtp_port", event.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Security" htmlFor="smtp-security">
-            <Select
-              id="smtp-security"
-              value={form.smtp_security}
-              onChange={(event) => update("smtp_security", event.target.value)}
-            >
-              <option value="starttls">STARTTLS (port 587)</option>
-              <option value="tls">SSL/TLS (port 465)</option>
-              <option value="none">No encryption</option>
-            </Select>
-          </Field>
-          <Field label="Authentication" htmlFor="smtp-auth" className="sm:col-span-2">
-            <Select
-              id="smtp-auth"
-              value={form.smtp_auth}
-              onChange={(event) => update("smtp_auth", event.target.value)}
-            >
-              <option value="plain">PLAIN</option>
-              <option value="login">LOGIN</option>
-              <option value="none">None</option>
-            </Select>
-          </Field>
-          {form.smtp_auth !== "none" ? (
-            <>
-              <Field label="Username" htmlFor="smtp-username">
+        <Field
+          label="Provider"
+          hint={form.delivery_mode === "direct" ? "No SMTP server needed." : "Presets fill in the fields below; sending always uses SMTP."}
+          htmlFor="delivery-provider"
+        >
+          <Select
+            id="delivery-provider"
+            value={form.provider}
+            onChange={(event) => update("provider", event.target.value)}
+          >
+            {PROVIDER_ORDER.map((provider) => (
+              <option key={provider} value={provider}>
+                {PROVIDERS[provider].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.04] px-3 py-2.5 text-[11px] leading-relaxed text-violet-200/60">
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-violet-400" />
+          {PROVIDERS[form.provider].info}
+        </div>
+
+        {form.delivery_mode === "smtp" ? (
+          <>
+            <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_120px]">
+              <Field label="SMTP host" htmlFor="smtp-host">
                 <Input
-                  id="smtp-username"
-                  autoComplete="off"
-                  value={form.smtp_username}
-                  onChange={(event) => update("smtp_username", event.target.value)}
+                  id="smtp-host"
+                  placeholder="smtp.example.com"
+                  value={form.smtp_host}
+                  onChange={(event) => update("smtp_host", event.target.value)}
                   required
                 />
               </Field>
-              <Field
-                label="Password"
-                hint={domain?.has_password ? "Leave blank to keep the current password." : undefined}
-                htmlFor="smtp-password"
-              >
+              <Field label="Port" htmlFor="smtp-port">
                 <Input
-                  id="smtp-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={form.smtp_password}
-                  onChange={(event) => update("smtp_password", event.target.value)}
-                  required={!domain?.has_password}
+                  id="smtp-port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={form.smtp_port}
+                  onChange={(event) => update("smtp_port", event.target.value)}
+                  required
                 />
               </Field>
-            </>
-          ) : null}
-        </div>
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#26262b] bg-[#0b0b0e] px-3 py-2.5 text-[11px] leading-relaxed text-zinc-500">
-          <KeyRound className="mt-0.5 size-3.5 shrink-0 text-zinc-600" />
-          SMTP credentials are encrypted with AES-256-GCM before being stored. Use port 587 with
-          STARTTLS or 465 with implicit TLS.
-        </div>
+              <Field label="Security" htmlFor="smtp-security">
+                <Select
+                  id="smtp-security"
+                  value={form.smtp_security}
+                  onChange={(event) => update("smtp_security", event.target.value)}
+                >
+                  <option value="starttls">STARTTLS (port 587)</option>
+                  <option value="tls">SSL/TLS (port 465)</option>
+                  <option value="none">No encryption</option>
+                </Select>
+              </Field>
+              <Field label="Authentication" htmlFor="smtp-auth" className="sm:col-span-2">
+                <Select
+                  id="smtp-auth"
+                  value={form.smtp_auth}
+                  onChange={(event) => update("smtp_auth", event.target.value)}
+                >
+                  <option value="plain">PLAIN</option>
+                  <option value="login">LOGIN</option>
+                  <option value="none">None</option>
+                </Select>
+              </Field>
+              {form.smtp_auth !== "none" ? (
+                <>
+                  <Field label="Username" htmlFor="smtp-username">
+                    <Input
+                      id="smtp-username"
+                      autoComplete="off"
+                      value={form.smtp_username}
+                      onChange={(event) => update("smtp_username", event.target.value)}
+                      required
+                    />
+                  </Field>
+                  <Field
+                    label="Password"
+                    hint={domain?.has_password ? "Leave blank to keep the current password." : undefined}
+                    htmlFor="smtp-password"
+                  >
+                    <Input
+                      id="smtp-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.smtp_password}
+                      onChange={(event) => update("smtp_password", event.target.value)}
+                      required={!domain?.has_password}
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#26262b] bg-[#0b0b0e] px-3 py-2.5 text-[11px] leading-relaxed text-zinc-500">
+              <KeyRound className="mt-0.5 size-3.5 shrink-0 text-zinc-600" />
+              SMTP credentials are encrypted with AES-256-GCM before being stored. Use port 587 with
+              STARTTLS or 465 with implicit TLS.
+            </div>
+          </>
+        ) : (
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#26262b] bg-[#0b0b0e] px-3 py-2.5 text-[11px] leading-relaxed text-zinc-500">
+            <Server className="mt-0.5 size-3.5 shrink-0 text-zinc-600" />
+            Direct delivery needs no SMTP host or credentials. Open the DNS panel after saving to
+            publish SPF and DKIM, and make sure outbound TCP port 25 is allowed.
+          </div>
+        )}
       </section>
 
       <div className="flex items-center justify-between border-t border-[#1f1f24] pt-5">
         <p className="text-[11px] text-zinc-600">
-          {domain ? "You'll need to re-test the connection after changing SMTP settings." : "You'll test the connection after saving."}
+          {domain ? "Re-run a delivery test after changing sender or delivery settings." : "You'll send a test email after saving."}
         </p>
         <div className="flex gap-2">
           <Button type="button" variant="ghost" onClick={onCancel}>
@@ -517,6 +673,7 @@ function TestDomainModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const direct = domain?.delivery_mode === "direct";
 
   const close = () => {
     if (loading) return;
@@ -538,10 +695,10 @@ function TestDomainModal({
         body: { to },
       });
       setSuccess(result.message || `Test email sent to ${to}`);
-      toast.success("SMTP connection verified");
+      toast.success("Delivery verified");
       await onComplete();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "SMTP test failed");
+      setError(err instanceof ApiError ? err.message : "Delivery test failed");
     } finally {
       setLoading(false);
     }
@@ -551,7 +708,7 @@ function TestDomainModal({
     <Modal
       open={Boolean(domain)}
       onClose={close}
-      title="Test SMTP connection"
+      title="Test delivery"
       description={`Send a real test email through ${domain?.name || "this domain"}.`}
       footer={
         <>
@@ -577,12 +734,16 @@ function TestDomainModal({
           <div className="flex items-start gap-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
             <div>
-              <p className="text-[13px] font-medium text-emerald-200">Connection verified</p>
+              <p className="text-[13px] font-medium text-emerald-200">Delivery verified</p>
               <p className="mt-0.5 text-[12px] text-emerald-300/60">{success}</p>
             </div>
           </div>
         ) : null}
-        <Field label="Test recipient" hint="We'll send a real message to verify SMTP authentication." htmlFor="test-to">
+        <Field
+          label="Test recipient"
+          hint={direct ? "We'll send a real message directly to the recipient's mail server." : "We'll send a real message through your SMTP relay."}
+          htmlFor="test-to"
+        >
           <Input
             id="test-to"
             type="email"
@@ -593,13 +754,18 @@ function TestDomainModal({
           />
         </Field>
         <div className="rounded-lg border border-[#26262b] bg-[#0b0b0e] p-3.5">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-zinc-600">Connection</p>
+          <p className="text-[10px] uppercase tracking-[0.08em] text-zinc-600">
+            {direct ? "Direct delivery" : "SMTP relay"}
+          </p>
           <p className="mt-1.5 font-mono text-[11.5px] text-zinc-400">
-            {domain?.smtp_host}:{domain?.smtp_port} · {domain?.smtp_security.toUpperCase()} ·{" "}
-            {domain?.smtp_auth === "none" ? "NO AUTH" : domain?.smtp_auth.toUpperCase()}
+            {direct
+              ? "RECIPIENT MX · PORT 25 · OPPORTUNISTIC TLS"
+              : `${domain?.smtp_host}:${domain?.smtp_port} · ${domain?.smtp_security.toUpperCase()} · ${domain?.smtp_auth === "none" ? "NO AUTH" : domain?.smtp_auth.toUpperCase()}`}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-zinc-600">
-            This can take up to 45 seconds while we connect to your server.
+            {direct
+              ? "This can take up to 55 seconds while we try the recipient's MX servers. Outbound port 25 must be open."
+              : "This can take up to 45 seconds while we connect to your relay."}
           </p>
         </div>
       </form>
@@ -661,6 +827,14 @@ function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => v
                       {value}
                     </p>
                   ))}
+                </div>
+              ) : null}
+              {check.recommended ? (
+                <div className="mt-2 rounded border border-emerald-500/10 bg-emerald-500/[0.03] px-2 py-1.5">
+                  <p className="text-[9px] uppercase tracking-[0.08em] text-emerald-500/70">Recommended</p>
+                  <p className="mt-1 break-all font-mono text-[10.5px] leading-relaxed text-emerald-200/70">
+                    {check.recommended}
+                  </p>
                 </div>
               ) : null}
             </div>

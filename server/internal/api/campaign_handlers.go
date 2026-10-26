@@ -317,7 +317,7 @@ func (s *Server) sendCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.loadDomain(r.Context(), workspaceID(r), *c.FromDomainID)
 	if err != nil || d.Status != "active" {
-		httpx.Error(w, http.StatusUnprocessableEntity, "domain_not_active", "The sending domain must pass an SMTP test before you can send campaigns")
+		httpx.Error(w, http.StatusUnprocessableEntity, "domain_not_active", "The sending domain must pass a delivery test before you can send campaigns")
 		return
 	}
 	var recipientCount int

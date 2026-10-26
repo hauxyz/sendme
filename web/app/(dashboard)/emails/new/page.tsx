@@ -65,7 +65,7 @@ export default function NewEmailPage() {
       return;
     }
     if (!activeDomains.some((domain) => domain.id === effectiveDomainId)) {
-      setError("This domain has not passed an SMTP test yet.");
+      setError("This domain has not passed a delivery test yet.");
       return;
     }
     if (schedule && !scheduledAt) {
@@ -112,7 +112,7 @@ export default function NewEmailPage() {
           </Link>
         }
         title="Send an email"
-        description="Deliver a transactional email through one of your verified SMTP domains."
+        description="Deliver a transactional email through one of your verified sending domains."
         actions={
           <>
             <Link href="/emails" className={cn(buttonVariants({ variant: "ghost" }), "hidden sm:inline-flex")}>
@@ -133,7 +133,7 @@ export default function NewEmailPage() {
             <div>
               <p className="text-sm font-medium text-amber-200">No verified sending domain</p>
               <p className="mt-1 text-[13px] text-amber-200/60">
-                Add an SMTP server for your domain and run a test before sending.
+                Add a sending domain and run a test before sending.
               </p>
             </div>
           </div>

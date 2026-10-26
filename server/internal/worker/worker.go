@@ -22,6 +22,7 @@ import (
 
 	"github.com/hauxyz/sendme/server/internal/config"
 	"github.com/hauxyz/sendme/server/internal/crypto"
+	"github.com/hauxyz/sendme/server/internal/dkim"
 	"github.com/hauxyz/sendme/server/internal/mailer"
 	"github.com/hauxyz/sendme/server/internal/queue"
 	"github.com/hauxyz/sendme/server/internal/tracking"
@@ -131,18 +132,39 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 	if job.DomainID == nil {
 		return final(errors.New("sending domain has been removed"))
 	}
-	var domainName, smtpHost, security, auth, username, encryptedPassword string
+	var domainName, deliveryMode, smtpHost, security, auth, username, encryptedPassword, selector, encryptedDKIM string
 	var smtpPort int
 	err = w.db.QueryRow(ctx, `
-		SELECT name, smtp_host, smtp_port, smtp_security, smtp_auth, smtp_username, smtp_password_enc
+		SELECT name, delivery_mode, smtp_host, smtp_port, smtp_security, smtp_auth, smtp_username, smtp_password_enc,
+			dkim_selector, dkim_private_key_enc
 		FROM domains WHERE id = $1
-	`, *job.DomainID).Scan(&domainName, &smtpHost, &smtpPort, &security, &auth, &username, &encryptedPassword)
+	`, *job.DomainID).Scan(&domainName, &deliveryMode, &smtpHost, &smtpPort, &security, &auth, &username, &encryptedPassword,
+		&selector, &encryptedDKIM)
 	if err != nil {
 		return final(fmt.Errorf("sending domain is unavailable: %w", err))
 	}
-	password, err := w.sealer.Decrypt(encryptedPassword)
-	if err != nil {
-		return final(fmt.Errorf("could not decrypt SMTP password: %w", err))
+
+	password := ""
+	var dkimCfg *mailer.DKIMConfig
+	if deliveryMode == mailer.ModeDirect {
+		if encryptedDKIM == "" {
+			return final(errors.New("sending domain has no DKIM key; edit and save the domain to generate one"))
+		}
+		privateKey, err := w.sealer.Decrypt(encryptedDKIM)
+		if err != nil {
+			return final(fmt.Errorf("could not decrypt DKIM key: %w", err))
+		}
+		if selector == "" {
+			selector = dkim.DefaultSelector
+		}
+		dkimCfg = &mailer.DKIMConfig{Domain: domainName, Selector: selector, PrivateKeyPEM: privateKey}
+	} else {
+		if encryptedPassword != "" {
+			password, err = w.sealer.Decrypt(encryptedPassword)
+			if err != nil {
+				return final(fmt.Errorf("could not decrypt SMTP password: %w", err))
+			}
+		}
 	}
 
 	headers := map[string]string{}
@@ -153,8 +175,9 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 	}
 	messageID := fmt.Sprintf("<%s@%s>", job.ID, domainName)
 	err = w.mailer.Send(ctx, mailer.SMTPConfig{
-		Host: smtpHost, Port: smtpPort, Security: security, Auth: auth,
+		Mode: deliveryMode, Host: smtpHost, Port: smtpPort, Security: security, Auth: auth,
 		Username: username, Password: password, FromEmail: job.FromEmail, FromName: job.FromName, ReplyTo: job.ReplyTo,
+		HeloHost: w.cfg.MailHeloHost, DKIM: dkimCfg,
 	}, mailer.Message{
 		To: job.ToEmail, ToName: job.ToName, Subject: job.Subject, HTML: html, Text: job.Text,
 		Headers: headers, MessageID: messageID, UnsubscribeURL: job.UnsubscribeURL,

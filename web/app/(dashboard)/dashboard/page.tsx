@@ -44,7 +44,7 @@ export default function DashboardPage() {
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const setupSteps = [
     { label: "Add a sending domain", done: domains.length > 0, href: "/domains" },
-    { label: "Test your SMTP connection", done: domains.some((domain) => domain.status === "active"), href: "/domains" },
+    { label: "Test your delivery setup", done: domains.some((domain) => domain.status === "active"), href: "/domains" },
     { label: "Add your first contacts", done: data.totals.contacts > 0, href: "/contacts" },
     { label: "Send an email", done: data.totals.sent > 0, href: "/emails/new" },
   ];
@@ -85,11 +85,11 @@ export default function DashboardPage() {
                 Getting started · {doneSteps} of {setupSteps.length}
               </div>
               <h2 className="mt-3 text-[15px] font-semibold text-zinc-100">
-                {doneSteps === 0 ? "Connect your own SMTP and start sending" : "Keep setting up your workspace"}
+                {doneSteps === 0 ? "Connect a delivery method and start sending" : "Keep setting up your workspace"}
               </h2>
               <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">
-                SendMe never routes mail through a third party. Add a domain, plug in your SMTP
-                credentials, and you&apos;re in control.
+                SendMe never routes mail through a third-party sending API. Use built-in direct
+                delivery or connect your own SMTP relay.
               </p>
             </div>
             <div className="grid w-full gap-2 sm:w-auto sm:min-w-[310px]">
@@ -186,7 +186,7 @@ export default function DashboardPage() {
         <Card className="flex flex-col">
           <CardHeader
             title="Domain health"
-            description="SMTP connections at a glance."
+            description="Delivery setups at a glance."
             action={
               <Link href="/domains">
                 <Button variant="ghost" size="sm">
@@ -204,7 +204,7 @@ export default function DashboardPage() {
                 </div>
                 <p className="mt-3 text-[13px] font-medium text-zinc-300">No domains yet</p>
                 <p className="mt-1 text-xs leading-relaxed text-zinc-600">
-                  Add your SMTP server to start sending.
+                  Add a sending domain to start.
                 </p>
                 <Link href="/domains" className="mt-4">
                   <Button size="sm" variant="secondary">
@@ -239,8 +239,8 @@ export default function DashboardPage() {
                           {domain.status === "active"
                             ? `${formatNumber(stats?.sent || 0)} sent in ${days}d`
                             : domain.status === "error"
-                              ? "SMTP error"
-                              : "Awaiting SMTP test"}
+                              ? "Delivery error"
+                              : "Awaiting delivery test"}
                         </p>
                       </div>
                       <ArrowUpRight className="size-3.5 text-zinc-700" />

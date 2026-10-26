@@ -87,7 +87,7 @@ func main() {
 		Handler:           apiServer.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		WriteTimeout:      90 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 

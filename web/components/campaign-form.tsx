@@ -73,7 +73,7 @@ export function CampaignForm({ campaign }: CampaignFormProps) {
       return;
     }
     if (!activeDomains.some((domain) => domain.id === effectiveDomainId)) {
-      setError("The selected domain has not passed an SMTP test yet.");
+      setError("The selected domain has not passed a delivery test yet.");
       return;
     }
     if (!effectiveAudienceId) {
@@ -137,7 +137,7 @@ export function CampaignForm({ campaign }: CampaignFormProps) {
           </Link>
         }
         title={editing ? "Edit campaign" : "New campaign"}
-        description="Write once and send to an audience through one of your verified SMTP domains."
+        description="Write once and send to an audience through one of your verified sending domains."
         actions={
           <>
             <Link
@@ -170,7 +170,7 @@ export function CampaignForm({ campaign }: CampaignFormProps) {
             <div>
               <p className="text-sm font-medium text-amber-200">No verified sending domain</p>
               <p className="mt-1 text-[13px] text-amber-200/60">
-                Add an SMTP server for your domain and run a test before scheduling this campaign.
+                Add a sending domain and run a test before scheduling this campaign.
               </p>
             </div>
           </div>

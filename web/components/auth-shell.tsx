@@ -5,13 +5,13 @@ import { Logo } from "@/components/logo";
 const features = [
   {
     icon: Server,
-    title: "Your SMTP, your infrastructure",
-    description: "Connect any SMTP server. No third-party sending APIs.",
+    title: "Direct delivery or your relay",
+    description: "Send straight from Go, or connect any SMTP server. No sending APIs.",
   },
   {
     icon: Globe,
     title: "Unlimited domains",
-    description: "Add every sending domain with its own SMTP credentials.",
+    description: "Each domain keeps its own delivery mode and sender identity.",
   },
   {
     icon: Zap,
@@ -41,7 +41,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           <div className="max-w-xl">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/[0.07] px-3 py-1.5 text-xs text-violet-300">
               <span className="size-1.5 rounded-full bg-violet-400" />
-              SMTP-only email infrastructure
+              SMTP delivery infrastructure
             </div>
             <h1 className="text-balance text-[44px] font-semibold leading-[1.08] tracking-[-0.045em] text-zinc-50 xl:text-[52px]">
               Email infrastructure,
@@ -51,8 +51,8 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
               </span>
             </h1>
             <p className="mt-6 max-w-md text-[15px] leading-relaxed text-zinc-400">
-              Run your own email platform on Postgres, Redis and SMTP. Add multiple domains, send
-              transactional email, and launch campaigns from one clean dashboard.
+              Run your own email platform on Postgres, Redis and SMTP. Send directly from Go or
+              connect a relay, add multiple domains, and launch campaigns from one clean dashboard.
             </p>
 
             <div className="mt-10 space-y-4">
@@ -96,7 +96,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
             <Check className="size-3 text-emerald-500" /> Multi-domain
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <Check className="size-3 text-emerald-500" /> SMTP only
+            <Check className="size-3 text-emerald-500" /> Direct + SMTP
           </span>
           <span className="inline-flex items-center gap-1.5">
             <Check className="size-3 text-emerald-500" /> Open source

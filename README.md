@@ -1,12 +1,13 @@
 # SendMe
 
-SendMe is a self-hosted email platform in the spirit of UseSend, built only with **Go, Next.js, PostgreSQL, and Redis**. It sends exclusively through **SMTP**, so any relay or mailbox provider that speaks SMTP can be used. There is no vendor integration, no service selector, and no third-party sending API.
+SendMe is a self-hosted email platform in the spirit of UseSend, built only with **Go, Next.js, PostgreSQL, and Redis**. It sends exclusively through **SMTP**: either Go's built-in direct-to-MX delivery with no relay to install, or any SMTP relay such as a local server, Amazon SES, Mailgun, SendGrid, or Postmark. There is no third-party sending API.
 
 Use it as a transactional email API, a campaign sender, a contact manager, or a full dashboard for several sending domains.
 
 ## Features
 
-- **Multiple sending domains** — each domain stores its own SMTP host, port, TLS mode, authentication mode, credentials, and sender identity. Credentials are encrypted with AES-256-GCM.
+- **Direct delivery or SMTP relay** — send from Go straight to each recipient's MX without installing an SMTP server, or connect any SMTP relay. Each domain stores its own mode, sender identity, TLS mode, authentication mode, and encrypted credentials.
+- **Multiple sending domains** — configure direct delivery, a local relay, Amazon SES, or any custom SMTP service per domain. Direct domains get a generated DKIM key and DNS guidance.
 - **Transactional API** — `POST /api/v1/emails` with a workspace API key, multiple recipients, scheduling, idempotency keys, tags-like custom headers, and open/click tracking.
 - **Campaigns** — draft, preview, send immediately, schedule, cancel, and delete. Campaigns render per-contact template variables and add an unsubscribe footer automatically.
 - **Contacts and audiences** — create, search, filter, paginate, edit, delete, import CSV, and manage audience membership in bulk.
@@ -26,7 +27,8 @@ Use it as a transactional email API, a campaign sender, a contact manager, or a 
 | Database | PostgreSQL 18 |
 | Queue and rate limits | Redis 7 |
 | Auth | JWT in an HttpOnly cookie, Argon2id passwords |
-| Secrets | AES-256-GCM for SMTP passwords |
+| Secrets | AES-256-GCM for SMTP passwords and DKIM keys |
+| Authentication (outbound) | SPF, DKIM (RSA-2048), DMARC guidance |
 
 ## Quick start with Docker
 
@@ -105,7 +107,7 @@ Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The ba
 | `DATABASE_URL` | local `sendme` database | PostgreSQL connection string. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string. |
 | `JWT_SECRET` | development fallback | Signs session cookies. Required in production. |
-| `ENCRYPTION_KEY` | derived in development | Base64-encoded 32-byte key for SMTP password encryption. Required in production. |
+| `ENCRYPTION_KEY` | derived in development | Base64-encoded 32-byte key for SMTP and DKIM secret encryption. Required in production. |
 | `SIGNING_SECRET` | `JWT_SECRET` | Signs tracking links and unsubscribe tokens. |
 | `SESSION_TTL` | `168h` | Session lifetime. |
 | `COOKIE_SECURE` | auto from `API_PUBLIC_URL` | Force the `Secure` cookie flag. |
@@ -113,6 +115,8 @@ Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The ba
 | `TRUSTED_ORIGINS` | `APP_URL` | Comma-separated extra CORS origins. |
 | `WORKER_ENABLED` | `true` | Run the background worker inside the API process. |
 | `WORKER_CONCURRENCY` | `10` | Worker concurrency. |
+| `MAIL_HELO_HOST` | sender domain | EHLO hostname for direct delivery. Set it to a hostname whose PTR record points at the server's public IP. |
+| `MAIL_PUBLIC_IP` | empty | Optional public IPv4/IPv6 address used to display the exact SPF record in DNS diagnostics. |
 | `NEXT_PUBLIC_API_PUBLIC_URL` | `http://localhost:8080` | Public API origin shown in the dashboard and API reference. Baked in at web build time. |
 | `API_INTERNAL_URL` | `http://localhost:8080` | Server-side proxy target used by Next.js. |
 
@@ -126,13 +130,36 @@ openssl rand -base64 32   # SIGNING_SECRET
 
 ## Add a sending domain
 
+Each domain uses one of two delivery modes:
+
+- **Direct delivery** — Go resolves each recipient's MX and delivers over SMTP port 25 with opportunistic STARTTLS. No SMTP server is installed. SendMe generates a DKIM RSA-2048 key for the domain.
+- **SMTP relay** — SendMe connects to an SMTP server you choose. The dashboard includes presets for a local relay, Amazon SES, Gmail/Google Workspace, Mailgun, SendGrid, Postmark, and a custom relay. Presets only fill in the form; sending is always plain SMTP.
+
+To add a domain:
+
 1. Open **Domains → Add domain**.
 2. Enter the domain name and sender identity (`From` name and address).
-3. Enter the SMTP endpoint: host, port, security (`none`, `starttls`, or `tls`), auth (`none`, `plain`, or `login`), username, and password.
-4. Save, choose a test recipient, and run the SMTP test. A domain becomes `active` only after a test email is delivered successfully.
-5. Optionally use **Check DNS** to inspect MX, SPF, and DMARC records. DKIM is configured on the SMTP relay.
+3. Choose a provider / delivery mode.
+   - **Direct delivery:** no host or credentials are needed. Publish the generated DKIM record and an SPF record that authorizes this server's public IP. Set `MAIL_HELO_HOST` to a hostname with a matching PTR record.
+   - **Local SMTP:** from Docker, `host.docker.internal` points to the machine running Docker. The relay must accept connections from the container.
+   - **Amazon SES:** use SES SMTP credentials (not IAM access keys) and replace `us-east-1` with your SES region. Amazon SNS is a notification service and is not an SMTP email sender.
+   - **Other relays:** use the SMTP host, port, security, and credentials from the provider.
+4. Save, choose a test recipient, and run **Test delivery**. A domain becomes `active` only after the recipient's MX or your relay accepts a real test email.
+5. Open **DNS** to inspect MX, SPF, DKIM, and DMARC records. Direct domains show the DKIM TXT value and a recommended SPF record based on `MAIL_PUBLIC_IP`.
 
 Only active domains can send email. The `From` address must belong to the selected domain. Reply-to, tracking, and unsubscribe behavior are configured per message or campaign.
+
+### Direct delivery requirements
+
+Direct delivery avoids an external relay but still needs working email infrastructure:
+
+- Outbound TCP port 25 must be open. Many ISPs and cloud providers block it; use an SMTP relay if yours does.
+- The server should have a static public IP with a PTR record matching `MAIL_HELO_HOST` (or the sender domain when unset).
+- Publish SPF, DKIM, and DMARC for the sending domain.
+- SendMe does not listen for inbound mail. Bounces and replies go to the `From`/`Reply-To` mailbox specified in the domain; SendMe cannot process bounce messages.
+- Direct delivery is best for small, controlled volumes. High-volume senders should use a reputable SMTP relay for IP reputation and feedback loops.
+
+Presets for provider settings are UI conveniences only. SendMe does not call Amazon, Mailgun, SendGrid, or any other vendor API.
 
 ## Send with the API
 
@@ -210,7 +237,8 @@ Unsubscribe links mark the contact as unsubscribed and render a small confirmati
 │       ├── config/              # environment configuration
 │       ├── crypto/              # AES-256-GCM secret sealing
 │       ├── database/            # pgx pool and embedded migrations
-│       ├── mailer/              # SMTP client
+│       ├── dkim/                # DKIM key generation
+│       ├── mailer/              # SMTP relay client and direct-to-MX delivery
 │       ├── queue/               # asynq client and rate limiting
 │       ├── tracking/            # signed links and HTML rewriting
 │       └── worker/              # email, campaign, and webhook tasks
@@ -227,8 +255,9 @@ Unsubscribe links mark the contact as unsubscribed and render a small confirmati
 
 - Put both services behind a TLS reverse proxy. Set `APP_URL` and `API_PUBLIC_URL` to the HTTPS origins, set `TRUSTED_ORIGINS` if the dashboard uses another origin, and leave `COOKIE_SECURE` empty for automatic detection or set it to `true`.
 - Generate fresh secrets. Never reuse the example values, and keep `.env` out of version control.
-- `ENCRYPTION_KEY` must decode to exactly 32 bytes. Changing it makes existing SMTP passwords unreadable.
+- `ENCRYPTION_KEY` must decode to exactly 32 bytes. Changing it makes existing SMTP passwords and direct-delivery DKIM keys unreadable.
 - Back up PostgreSQL and the Redis append-only file. Redis holds queued sends and rate-limit counters; Postgres holds all durable state.
 - `NEXT_PUBLIC_API_PUBLIC_URL` is compiled into the dashboard. Set it before building the web image, for example with `API_PUBLIC_URL=https://mail.example.com docker compose build web`.
-- The API trusts the SMTP server you configure. Use a relay that handles DKIM signing and outbound reputation.
+- For direct delivery, allow outbound TCP 25, set `MAIL_HELO_HOST` to a hostname with matching PTR, and publish SPF/DKIM/DMARC. A relay is the better choice when port 25 is blocked or you need managed IP reputation.
+- When using an SMTP relay, SendMe trusts that relay. Use one that handles DKIM signing and outbound reputation.
 - Rate limiting is per API key in Redis (120 requests/minute). Add a reverse-proxy limit for unauthenticated endpoints if the API is publicly reachable.

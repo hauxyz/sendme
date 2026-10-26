@@ -130,7 +130,7 @@ export default function EmailDetailPage() {
       ) : null}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-4">
-        <Metric icon={Send} label="Status" value={email.status === "sent" ? "Accepted by SMTP" : email.status} />
+        <Metric icon={Send} label="Status" value={email.status === "sent" ? "Accepted for delivery" : email.status} />
         <Metric icon={Eye} label="Opens" value={String(email.opens)} hint={email.first_opened_at ? formatRelative(email.first_opened_at) : "No opens yet"} />
         <Metric icon={MousePointerClick} label="Clicks" value={String(email.clicks)} hint={email.clicks > 0 ? "Tracked link clicks" : "No clicks yet"} />
         <Metric icon={Clock} label="Attempts" value={String(email.attempts)} hint={email.sent_at ? `Sent ${formatRelative(email.sent_at)}` : "Not sent yet"} />
@@ -201,7 +201,7 @@ export default function EmailDetailPage() {
                 label="Source"
                 value={
                   email.campaign_name ||
-                  (email.source === "api" ? "REST API" : email.source === "dashboard" ? "Dashboard" : "SMTP test")
+                  (email.source === "api" ? "REST API" : email.source === "dashboard" ? "Dashboard" : "Delivery test")
                 }
               />
               <Detail label="Tracking ID" value={email.tracking_id} mono />
@@ -277,10 +277,10 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
 
 const eventMeta: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
   queued: { label: "Queued for delivery", icon: Clock, color: "text-amber-400 bg-amber-500/10" },
-  sending: { label: "Connecting to SMTP", icon: Send, color: "text-violet-400 bg-violet-500/10" },
-  sent: { label: "Accepted by SMTP server", icon: CheckCircle2, color: "text-emerald-400 bg-emerald-500/10" },
+  sending: { label: "Connecting to mail server", icon: Send, color: "text-violet-400 bg-violet-500/10" },
+  sent: { label: "Accepted for delivery", icon: CheckCircle2, color: "text-emerald-400 bg-emerald-500/10" },
   failed: { label: "Delivery failed", icon: XCircle, color: "text-rose-400 bg-rose-500/10" },
-  send_failed: { label: "SMTP attempt failed", icon: AlertTriangle, color: "text-amber-400 bg-amber-500/10" },
+  send_failed: { label: "Delivery attempt failed", icon: AlertTriangle, color: "text-amber-400 bg-amber-500/10" },
   opened: { label: "Email opened", icon: Eye, color: "text-sky-400 bg-sky-500/10" },
   clicked: { label: "Link clicked", icon: Link2, color: "text-violet-400 bg-violet-500/10" },
 };

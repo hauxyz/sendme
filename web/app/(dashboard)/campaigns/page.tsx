@@ -44,7 +44,7 @@ export default function CampaignsPage() {
     <div>
       <PageHeader
         title="Campaigns"
-        description="Send newsletters and product updates to your audiences through your own SMTP servers."
+        description="Send newsletters and product updates to your audiences through your verified sending domains."
         actions={
           <Link href="/campaigns/new">
             <Button>
@@ -94,7 +94,7 @@ export default function CampaignsPage() {
           <EmptyState
             icon={<Megaphone className="size-5" />}
             title={status === "all" ? "No campaigns yet" : `No ${status} campaigns`}
-            description="Create a campaign, choose an audience and send at scale through your SMTP infrastructure."
+            description="Create a campaign, choose an audience and send at scale through direct delivery or your SMTP relay."
             action={
               <Link href="/campaigns/new">
                 <Button>

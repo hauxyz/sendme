@@ -119,11 +119,11 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
           <DocSection
             id="overview"
             title="Overview"
-            description="SendMe sends transactional and campaign email through the SMTP servers you configure. The public API is scoped to your workspace and uses your verified sending domains."
+            description="SendMe sends transactional and campaign email through built-in direct delivery or the SMTP relays you configure. The public API is scoped to your workspace and uses your verified sending domains."
           >
             <div className="grid gap-3 sm:grid-cols-3">
               <DocFeature icon={Mail} title="Send email" text="Queue one or many recipients in a single request." />
-              <DocFeature icon={ShieldCheck} title="Own your SMTP" text="Deliver through your own mail infrastructure." />
+              <DocFeature icon={ShieldCheck} title="Own your delivery" text="Send direct from Go or through your own SMTP infrastructure." />
               <DocFeature icon={Webhook} title="Webhooks" text="Receive signed delivery and engagement events." />
             </div>
             <div className="rounded-xl border border-[#26262b] bg-[#0b0b0e] p-4">
@@ -131,7 +131,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
               <p className="mt-1.5 break-all font-mono text-[13px] text-zinc-300">{PUBLIC_API_URL}/api/v1</p>
             </div>
             <Callout tone="amber" icon={AlertTriangle}>
-              At least one domain must be added and pass an SMTP test before the API can send. Add a
+              At least one domain must be added and pass a delivery test before the API can send. Add a
               domain from <Link href="/domains" className="text-amber-200 underline underline-offset-2">Domains</Link>.
             </Callout>
           </DocSection>
@@ -158,7 +158,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
           <DocSection
             id="send-email"
             title="Send email"
-            description="Queue a transactional email for immediate or scheduled delivery through one of your verified SMTP domains."
+            description="Queue a transactional email for immediate or scheduled delivery through one of your verified sending domains."
           >
             <Endpoint method="POST" path="/emails" />
             <CodeBlock title="cURL" code={sendEmail} />
@@ -186,7 +186,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             <CodeBlock title="201 Created" code={response} />
             <Callout tone="zinc" icon={CheckCircle2}>
               Delivery is asynchronous. A <code className="text-zinc-400">queued</code> response means
-              the message is in Redis; poll the email endpoint for final SMTP status.
+              the message is in Redis; poll the email endpoint for final delivery status.
             </Callout>
           </DocSection>
 
@@ -370,7 +370,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
               code={`{
   "error": {
     "code": "domain_not_active",
-    "message": "Test the SMTP configuration for this domain before sending"
+    "message": "Test the delivery configuration for this domain before sending"
   }
 }`}
             />
@@ -400,7 +400,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
               </table>
             </div>
             <Callout tone="zinc" icon={ShieldCheck}>
-              API keys are limited to 120 requests per minute. Transient SMTP failures are retried by
+              API keys are limited to 120 requests per minute. Transient delivery failures are retried by
               the background worker with backoff before an email is marked failed.
             </Callout>
             <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-violet-500/15 bg-[linear-gradient(110deg,rgba(139,92,246,0.06),rgba(15,15,18,0)_65%)] p-5 sm:flex-row sm:items-center">

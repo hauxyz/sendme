@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ type Config struct {
 	WorkerEnabled     bool
 	WorkerConcurrency int
 	TrustedOrigins    []string
+	MailHeloHost      string
+	MailPublicIP      string
 }
 
 func Load() (*Config, error) {
@@ -102,6 +105,15 @@ func Load() (*Config, error) {
 		signingSecret = jwtSecret
 	}
 
+	mailHeloHost := strings.TrimSpace(os.Getenv("MAIL_HELO_HOST"))
+	if strings.ContainsAny(mailHeloHost, " \t\r\n/") {
+		return nil, fmt.Errorf("MAIL_HELO_HOST must be a valid hostname")
+	}
+	mailPublicIP := strings.TrimSpace(os.Getenv("MAIL_PUBLIC_IP"))
+	if mailPublicIP != "" && net.ParseIP(mailPublicIP) == nil {
+		return nil, fmt.Errorf("MAIL_PUBLIC_IP must be a valid IPv4 or IPv6 address")
+	}
+
 	return &Config{
 		Env:               env,
 		Port:              port,
@@ -118,6 +130,8 @@ func Load() (*Config, error) {
 		WorkerEnabled:     workerEnabled,
 		WorkerConcurrency: concurrency,
 		TrustedOrigins:    origins,
+		MailHeloHost:      mailHeloHost,
+		MailPublicIP:      mailPublicIP,
 	}, nil
 }
 

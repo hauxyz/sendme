@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: "%s — SendMe",
   },
   description:
-    "Send transactional email and campaigns through your own SMTP servers. Multi-domain, self-hosted, and built for developers.",
+    "Send transactional email and campaigns with direct Go delivery or your own SMTP relays. Multi-domain, self-hosted, and built for developers.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
