@@ -105,7 +105,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.tokens.Issue(userID, workspaceID)
+	token, err := s.tokens.Issue(userID, workspaceID, 0)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not create a session")
 		return
@@ -141,15 +141,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userID, name, email, passwordHash, workspaceID, workspaceName string
+	var sessionVersion int
 	err := s.db.QueryRow(r.Context(), `
-		SELECT u.id, u.name, u.email, u.password_hash, w.id, w.name
+		SELECT u.id, u.name, u.email, u.password_hash, w.id, w.name, u.session_version
 		FROM users u
 		JOIN workspace_members m ON m.user_id = u.id
 		JOIN workspaces w ON w.id = m.workspace_id
 		WHERE u.email = $1
 		ORDER BY m.created_at ASC
 		LIMIT 1
-	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &workspaceID, &workspaceName)
+	`, req.Email).Scan(&userID, &name, &email, &passwordHash, &workspaceID, &workspaceName, &sessionVersion)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			s.logger.Error("login lookup", "error", err)
@@ -162,7 +163,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.tokens.Issue(userID, workspaceID)
+	token, err := s.tokens.Issue(userID, workspaceID, sessionVersion)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not create a session")
 		return
@@ -240,10 +241,27 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not update your password")
 		return
 	}
-	if _, err := s.db.Exec(r.Context(), `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, newHash, user.ID); err != nil {
+	var sessionVersion int
+	err = s.db.QueryRow(r.Context(), `
+		UPDATE users
+		SET password_hash = $1, session_version = session_version + 1, updated_at = now()
+		WHERE id = $2
+		RETURNING session_version
+	`, newHash, user.ID).Scan(&sessionVersion)
+	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not update your password")
 		return
 	}
+
+	// Rotating the version revokes every other session. Re-issue the current
+	// session so the user who just changed their password stays signed in.
+	token, err := s.tokens.Issue(user.ID, user.WorkspaceID, sessionVersion)
+	if err != nil {
+		s.logger.Error("issue session after password change", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Password changed, but a new session could not be created")
+		return
+	}
+	s.tokens.SetCookie(w, token)
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

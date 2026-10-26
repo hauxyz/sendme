@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help init dev infra-up infra-down up down logs ps build api web check fmt test clean
+.PHONY: help init dev infra-up infra-down up down logs ps build api web admin-cli check fmt test clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -41,8 +41,9 @@ logs: ## Follow application logs
 ps: ## Show container status
 	docker compose ps
 
-build: ## Build the Go server and the Next.js production bundle
+build: ## Build the Go binaries and the Next.js production bundle
 	cd server && go build -o bin/sendme ./cmd/server
+	cd server && go build -o bin/admin-cli ./cmd/admin-cli
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$API_PUBLIC_URL}"; \
 	cd web && npm run build
@@ -54,6 +55,9 @@ web: ## Run the Next.js dev server
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	export NEXT_PUBLIC_API_PUBLIC_URL="$${NEXT_PUBLIC_API_PUBLIC_URL:-$$API_PUBLIC_URL}"; \
 	cd web && npm run dev
+
+admin-cli: ## Run the admin CLI (ARGS="create-admin --email ...")
+	cd server && go run ./cmd/admin-cli $(ARGS)
 
 check: fmt test ## Run formatting, vet, lint and type checks
 	@test -z "$$(gofmt -l server)" || { echo "Go files need formatting:"; gofmt -l server; exit 1; }

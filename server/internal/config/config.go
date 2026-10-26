@@ -13,6 +13,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+const defaultDatabaseURL = "postgres://sendme:sendme@localhost:5432/sendme?sslmode=disable"
+
 type Config struct {
 	Env               string
 	Port              string
@@ -103,7 +105,7 @@ func Load() (*Config, error) {
 	return &Config{
 		Env:               env,
 		Port:              port,
-		DatabaseURL:       envOr("DATABASE_URL", "postgres://sendme:sendme@localhost:5432/sendme?sslmode=disable"),
+		DatabaseURL:       envOr("DATABASE_URL", defaultDatabaseURL),
 		RedisURL:          envOr("REDIS_URL", "redis://localhost:6379/0"),
 		JWTSecret:         jwtSecret,
 		SigningSecret:     []byte(signingSecret),
@@ -117,6 +119,14 @@ func Load() (*Config, error) {
 		WorkerConcurrency: concurrency,
 		TrustedOrigins:    origins,
 	}, nil
+}
+
+// DatabaseURL loads the environment files and returns the configured database
+// URL. It lets maintenance commands run without requiring unrelated
+// production secrets such as JWT_SECRET or ENCRYPTION_KEY.
+func DatabaseURL() string {
+	loadEnvFiles()
+	return envOr("DATABASE_URL", defaultDatabaseURL)
 }
 
 func loadEncryptionKey(env, jwtSecret string) ([]byte, error) {

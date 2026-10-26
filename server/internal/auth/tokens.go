@@ -11,8 +11,9 @@ import (
 const CookieName = "sendme_session"
 
 type Claims struct {
-	UserID      string `json:"uid"`
-	WorkspaceID string `json:"wid"`
+	UserID         string `json:"uid"`
+	WorkspaceID    string `json:"wid"`
+	SessionVersion int    `json:"sv"`
 	jwt.RegisteredClaims
 }
 
@@ -27,11 +28,12 @@ func NewTokens(secret []byte, sessionTTL time.Duration, secure bool, domain stri
 	return &Tokens{secret: secret, sessionTTL: sessionTTL, secure: secure, domain: domain}
 }
 
-func (t *Tokens) Issue(userID, workspaceID string) (string, error) {
+func (t *Tokens) Issue(userID, workspaceID string, sessionVersion int) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID:      userID,
-		WorkspaceID: workspaceID,
+		UserID:         userID,
+		WorkspaceID:    workspaceID,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "sendme",
 			Subject:   userID,

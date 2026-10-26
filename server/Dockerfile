@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/sendme ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/sendme ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/admin-cli ./cmd/admin-cli
 
 FROM alpine:3.22
 
@@ -15,6 +16,7 @@ RUN apk add --no-cache ca-certificates tzdata \
     && adduser -S sendme -G sendme
 
 COPY --from=build /out/sendme /usr/local/bin/sendme
+COPY --from=build /out/admin-cli /usr/local/bin/admin-cli
 
 USER sendme
 EXPOSE 8080

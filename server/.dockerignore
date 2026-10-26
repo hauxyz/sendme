@@ -2,6 +2,7 @@
 .env
 sendme
 server
+bin/
 *.test
 *.out
 coverage/

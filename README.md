@@ -14,6 +14,7 @@ Use it as a transactional email API, a campaign sender, a contact manager, or a 
 - **Webhooks** — subscribe to delivery and engagement events, sign deliveries with HMAC-SHA256, send test events, and review delivery history.
 - **API keys** — workspace-scoped bearer keys, shown in full once, with a per-key rate limit of 120 requests per minute.
 - **Analytics** — workspace overview with send, delivery, open, and click metrics.
+- **Admin CLI** — create workspace-owner accounts and reset passwords without the dashboard, with immediate session revocation.
 - **Single-binary backend** — the HTTP API and background worker (asynq + Redis) run in one Go process.
 
 ## Stack
@@ -63,6 +64,33 @@ make dev           # API on :8080 and Next.js on :3000
 `make dev` runs the API with the worker enabled. Use `make api` and `make web` in separate terminals if you prefer. `make check` runs gofmt, `go vet`, backend tests, ESLint, and TypeScript.
 
 The frontend calls the API through the same-origin route `/api/proxy/*`. In development it forwards to `http://localhost:8080`; in Docker it forwards to `http://server:8080`. Override the target with `API_INTERNAL_URL`.
+
+## Admin CLI
+
+Account administration runs outside the dashboard. Use `admin-cli` to create the first owner account or reset a forgotten password. Interactive passwords are prompted without echo and are never printed.
+
+Create a workspace owner (the account has full admin access to its workspace):
+
+```bash
+docker compose exec server admin-cli create-admin \
+  --email admin@example.com \
+  --name "Admin" \
+  --workspace "Acme"
+```
+
+Reset a password and revoke every existing session for that account:
+
+```bash
+docker compose exec server admin-cli reset-password --email admin@example.com
+```
+
+For local development, use `make admin-cli ARGS='...'` or run `server/bin/admin-cli ...` after `make build`. For non-interactive automation, pipe the password on stdin:
+
+```bash
+printf '%s\n' "$NEW_PASSWORD" | docker compose exec -T server admin-cli reset-password --email admin@example.com
+```
+
+`create-admin` fails if the email is already registered; use `reset-password` for existing accounts. The CLI reads `DATABASE_URL` from the environment or `.env`. If a password is supplied with `--password`, it may be visible in shell history and process listings, so interactive input is preferred.
 
 ## Configuration
 
@@ -174,7 +202,9 @@ Unsubscribe links mark the contact as unsubscribed and render a small confirmati
 .
 ├── server/
 │   ├── cmd/server/              # API + worker entrypoint
+│   ├── cmd/admin-cli/           # account administration CLI
 │   └── internal/
+│       ├── admin/               # owner creation and password reset
 │       ├── api/                 # HTTP handlers, auth, middleware, tracking
 │       ├── auth/                # JWT sessions and Argon2id passwords
 │       ├── config/              # environment configuration
