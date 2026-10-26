@@ -20,12 +20,13 @@ type ProxyContext = { params: Promise<{ path: string[] }> };
 
 /**
  * Forward a request to the Go API. Dashboard requests use the internal
- * `/api/proxy/*` route, while the public API is exposed at `/api/v1/*`.
+ * `/api/proxy/*` route, the public API is exposed at `/api/v1/*`, and
+ * tracking/unsubscribe links are exposed at `/api/t/*` and `/api/u/*`.
  */
 export async function proxyToAPI(
   request: NextRequest,
   context: ProxyContext,
-  backendPrefix: "/api" | "/api/v1",
+  backendPrefix: "/api" | "/api/v1" | "/api/t" | "/api/u",
 ) {
   const { path } = await context.params;
   const target = `${API_BASE}${backendPrefix}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;

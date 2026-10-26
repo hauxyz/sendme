@@ -15,7 +15,7 @@ import {
 import { useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { api, ApiError, fetcher, PUBLIC_API_URL } from "@/lib/api";
+import { api, ApiError, fetcher, PUBLIC_APP_URL } from "@/lib/api";
 import type { APIKey } from "@/lib/types";
 import { copyToClipboard, formatDate, formatRelative } from "@/lib/utils";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/page";
@@ -91,7 +91,7 @@ export default function APIKeysPage() {
     }
   };
 
-  const curl = `curl -X POST ${PUBLIC_API_URL}/api/v1/emails \\
+  const curl = `curl -X POST ${PUBLIC_APP_URL}/api/v1/emails \\
   -H "Authorization: Bearer <your-api-key>" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -130,7 +130,7 @@ export default function APIKeysPage() {
           <div>
             <p className="text-[13px] font-medium text-zinc-200">One API, every verified domain.</p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500">
-              Keys are scoped to <span className="font-mono text-[11px] text-zinc-400">{PUBLIC_API_URL}/api/v1</span>.
+              Keys are scoped to <span className="font-mono text-[11px] text-zinc-400">{PUBLIC_APP_URL}/api/v1</span>.
               Revoked keys stop working immediately.
             </p>
           </div>

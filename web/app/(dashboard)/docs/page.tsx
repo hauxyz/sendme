@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   Webhook,
 } from "lucide-react";
-import { PUBLIC_API_URL } from "@/lib/api";
+import { PUBLIC_APP_URL } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/page";
 import { Badge } from "@/components/status-badge";
@@ -32,7 +32,7 @@ const sections = [
 ];
 
 export default function DocsPage() {
-  const sendEmail = `curl -X POST ${PUBLIC_API_URL}/api/v1/emails \\
+  const sendEmail = `curl -X POST ${PUBLIC_APP_URL}/api/v1/emails \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -102,7 +102,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
               REST · JSON · Bearer
             </div>
             <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-600">
-              {PUBLIC_API_URL}/api/v1
+              {PUBLIC_APP_URL}/api/v1
             </p>
           </div>
         </aside>
@@ -120,7 +120,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             </div>
             <div className="rounded-xl border border-[#26262b] bg-[#0b0b0e] p-4">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600">Base URL</p>
-              <p className="mt-1.5 break-all font-mono text-[13px] text-zinc-300">{PUBLIC_API_URL}/api/v1</p>
+              <p className="mt-1.5 break-all font-mono text-[13px] text-zinc-300">{PUBLIC_APP_URL}/api/v1</p>
               <p className="mt-2 text-[11px] leading-relaxed text-zinc-600">
                 Requests are proxied by Next.js to the Go API. Use this origin for server-side and browser clients.
               </p>
@@ -202,7 +202,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             </p>
             <CodeBlock
               title="Idempotent request"
-              code={`curl -X POST ${PUBLIC_API_URL}/api/v1/emails \\
+              code={`curl -X POST ${PUBLIC_APP_URL}/api/v1/emails \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Idempotency-Key: order-confirmation-10482" \\
   -H "Content-Type: application/json" \\
@@ -273,7 +273,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             <Endpoint method="POST" path="/contactBooks" />
             <CodeBlock
               title="Create a contact book"
-              code={`curl -X POST ${PUBLIC_API_URL}/api/v1/contactBooks \\
+              code={`curl -X POST ${PUBLIC_APP_URL}/api/v1/contactBooks \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{"name":"Customers"}'`}
@@ -290,7 +290,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             />
             <CodeBlock
               title="Add a contact"
-              code={`curl -X POST ${PUBLIC_API_URL}/api/v1/contactBooks/{contactBookId}/contacts \\
+              code={`curl -X POST ${PUBLIC_APP_URL}/api/v1/contactBooks/{contactBookId}/contacts \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -326,7 +326,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             <Endpoint method="POST" path="/domains" />
             <CodeBlock
               title="Create a direct-delivery domain"
-              code={`curl -X POST ${PUBLIC_API_URL}/api/v1/domains \\
+              code={`curl -X POST ${PUBLIC_APP_URL}/api/v1/domains \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{"name":"mail.example.com"}'`}
@@ -357,7 +357,7 @@ if (!valid) throw new Error("Invalid SendMe webhook signature");`;
             <Endpoint method="POST" path="/campaigns" />
             <CodeBlock
               title="Create and send a campaign"
-              code={`curl -X POST ${PUBLIC_API_URL}/api/v1/campaigns \\
+              code={`curl -X POST ${PUBLIC_APP_URL}/api/v1/campaigns \\
   -H "Authorization: Bearer sm_live_..." \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -562,7 +562,7 @@ function Endpoint({ method, path }: { method: string; path: string }) {
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#26262b] bg-[#0b0b0e] px-4 py-3">
       <Badge tone={method === "POST" ? "violet" : "sky"}>{method}</Badge>
       <code className="break-all font-mono text-[12px] text-zinc-300">
-        <span className="text-zinc-600">{PUBLIC_API_URL}/api/v1</span>
+        <span className="text-zinc-600">{PUBLIC_APP_URL}/api/v1</span>
         {path}
       </code>
     </div>

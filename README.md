@@ -104,6 +104,8 @@ docker compose exec server admin-cli demote --email admin@example.com
 
 `create-admin` fails if the email is already registered; use `reset-password` for existing accounts. The CLI reads `DATABASE_URL` from the environment or `.env`. If a password is supplied with `--password`, it may be visible in shell history and process listings, so interactive input is preferred.
 
+For the isolated production stack, use `make prod-admin-cli ARGS='...'` instead of `docker compose exec`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The backend also reads `.env` from the repository root, `server/`, and one directory above.
@@ -112,23 +114,24 @@ Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The ba
 | --- | --- | --- |
 | `APP_ENV` | `development` | Set to `production` to require explicit secrets. |
 | `PORT` | `8080` | API listen port. |
-| `APP_URL` | `http://localhost:3000` | Dashboard origin, used for CORS and trusted origins. |
-| `API_PUBLIC_URL` | `http://localhost:8080` | Public API origin used in tracking and unsubscribe links. |
+| `APP_URL` | `http://localhost:3000` | Public dashboard origin. The API, tracking, click and unsubscribe routes are served from `<APP_URL>/api`; also used for CORS and trusted origins. |
 | `DATABASE_URL` | local `sendme` database | PostgreSQL connection string. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string. |
 | `JWT_SECRET` | development fallback | Signs session cookies. Required in production. |
 | `ENCRYPTION_KEY` | derived in development | Base64-encoded 32-byte key for SMTP and DKIM secret encryption. Required in production. |
 | `SIGNING_SECRET` | `JWT_SECRET` | Signs tracking links and unsubscribe tokens. |
 | `SESSION_TTL` | `168h` | Session lifetime. |
-| `COOKIE_SECURE` | auto from `API_PUBLIC_URL` | Force the `Secure` cookie flag. |
+| `COOKIE_SECURE` | auto from `APP_URL` | Force the `Secure` cookie flag. |
 | `COOKIE_DOMAIN` | empty | Optional cookie domain. |
 | `TRUSTED_ORIGINS` | `APP_URL` | Comma-separated extra CORS origins. |
 | `WORKER_ENABLED` | `true` | Run the background worker inside the API process. |
 | `WORKER_CONCURRENCY` | `10` | Worker concurrency. |
 | `MAIL_HELO_HOST` | sender domain | EHLO hostname for direct delivery. Set it to a hostname whose PTR record points at the server's public IP. |
 | `MAIL_PUBLIC_IP` | empty | Optional public IPv4/IPv6 address used to display the exact SPF record in DNS diagnostics. |
-| `NEXT_PUBLIC_API_PUBLIC_URL` | `http://localhost:3000` | Public web origin shown in the dashboard and API reference. The API lives at `<origin>/api/v1`. Baked in at web build time. |
+| `NEXT_PUBLIC_APP_URL` | `APP_URL` | Build-time public origin rendered in dashboard API examples. Compose and `make` derive it from `APP_URL`; no separate value is normally needed. |
 | `API_INTERNAL_URL` | `http://localhost:8080` | Server-side proxy target used by Next.js. |
+| `ENV_FILE` | `.env` | Compose env file loaded by the server service. `make init-prod` sets this to `.env.prod`. |
+| `COMPOSE_PROJECT_NAME` | `sendme` | Docker Compose project name. `make init-prod` sets this to `sendme-prod` so production containers and volumes stay separate from development. |
 
 Generate secrets with:
 
@@ -241,9 +244,9 @@ The signed payload is `timestamp + "." + raw_request_body`, HMAC-SHA256 with the
 
 When tracking is enabled, SendMe rewrites links and injects a tracking pixel. Open and click endpoints are public and unauthenticated:
 
-- `GET /t/o/{tracking_id}.gif`
-- `GET /t/c/{tracking_id}?url=...&sig=...`
-- `GET /u/{token}`
+- `GET /api/t/o/{tracking_id}.gif`
+- `GET /api/t/c/{tracking_id}?url=...&sig=...`
+- `GET /api/u/{token}`
 
 Unsubscribe links mark the contact as unsubscribed and render a small confirmation page. Campaign sends exclude unsubscribed contacts.
 
@@ -275,13 +278,27 @@ Unsubscribe links mark the contact as unsubscribed and render a small confirmati
 └── .env.example
 ```
 
-## Production notes
+## Production deployment
 
-- Put both services behind a TLS reverse proxy. Set `APP_URL` and `NEXT_PUBLIC_API_PUBLIC_URL` to the dashboard HTTPS origin, keep `API_PUBLIC_URL` on the backend origin used for tracking links, set `TRUSTED_ORIGINS` if the dashboard uses another origin, and leave `COOKIE_SECURE` empty for automatic detection or set it to `true`.
-- Generate fresh secrets. Never reuse the example values, and keep `.env` out of version control.
+Generate a production env file with fresh secrets and start an isolated Compose project:
+
+```bash
+make init-prod APP_URL=https://mail.example.com
+$EDITOR .env.prod   # review MAIL_HELO_HOST, MAIL_PUBLIC_IP, and port mappings
+make prod-up
+```
+
+`make init-prod` creates a mode-`0600` `.env.prod`, sets `APP_ENV=production` and `COOKIE_SECURE=true`, and generates the JWT, encryption, signing, and PostgreSQL secrets. It refuses to overwrite an existing `.env.prod`.
+
+`make prod-up` loads `.env.prod` and uses the `sendme-prod` Compose project, so its containers and volumes are separate from local development. Stop the local stack first if both use the same host ports. Use `make prod-down`, `make prod-logs`, `make prod-ps`, and `make prod-admin-cli ARGS='...'` to manage it.
+
+### Production notes
+
+- Put both services behind a TLS reverse proxy. Set `APP_URL` to the public HTTPS origin; the public API and all tracking/unsubscribe links use `<APP_URL>/api`. Set `TRUSTED_ORIGINS` if the dashboard uses another origin, and leave `COOKIE_SECURE` empty for automatic detection or set it to `true`.
+- Generate fresh secrets. Never reuse the example values. Both `.env` and `.env.prod` are ignored by git and should stay private.
 - `ENCRYPTION_KEY` must decode to exactly 32 bytes. Changing it makes existing SMTP passwords and direct-delivery DKIM keys unreadable.
 - Back up PostgreSQL and the Redis append-only file. Redis holds queued sends and rate-limit counters; Postgres holds all durable state.
-- `NEXT_PUBLIC_API_PUBLIC_URL` is compiled into the dashboard and should be the public web origin, not the Go API origin. Set it before building the web image, for example with `NEXT_PUBLIC_API_PUBLIC_URL=https://mail.example.com docker compose build web`.
+- Compose bakes `APP_URL` into the dashboard as `NEXT_PUBLIC_APP_URL` so API examples show the correct origin. If you build the web image manually, pass it yourself, for example `docker build --build-arg NEXT_PUBLIC_APP_URL=https://mail.example.com web`.
 - For direct delivery, allow outbound TCP 25, set `MAIL_HELO_HOST` to a hostname with matching PTR, and publish SPF/DKIM/DMARC. A relay is the better choice when port 25 is blocked or you need managed IP reputation.
 - When using an SMTP relay, SendMe trusts that relay. Use one that handles DKIM signing and outbound reputation.
 - Rate limiting is per API key in Redis (120 requests/minute). Add a reverse-proxy limit for unauthenticated endpoints if the API is publicly reachable.

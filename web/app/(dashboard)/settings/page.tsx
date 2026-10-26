@@ -4,7 +4,7 @@ import Link from "next/link";
 import { BookOpen, Building2, Check, Eye, EyeOff, KeyRound, LockKeyhole, ShieldCheck, User } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api, ApiError, PUBLIC_API_URL } from "@/lib/api";
+import { api, ApiError, PUBLIC_APP_URL } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { Session } from "@/lib/types";
 import { PageHeader, PageLoading } from "@/components/ui/page";
@@ -60,7 +60,7 @@ function SettingsContent({
               </div>
               <div>
                 <dt className="text-[10px] uppercase tracking-[0.08em] text-zinc-600">Public API base URL</dt>
-                <dd className="mt-1 break-all font-mono text-[10.5px] text-zinc-500">{PUBLIC_API_URL}/api/v1</dd>
+                <dd className="mt-1 break-all font-mono text-[10.5px] text-zinc-500">{PUBLIC_APP_URL}/api/v1</dd>
               </div>
             </dl>
           </Card>

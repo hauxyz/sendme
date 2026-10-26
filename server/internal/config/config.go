@@ -25,7 +25,7 @@ type Config struct {
 	SigningSecret     []byte
 	EncryptionKey     []byte
 	AppURL            string
-	APIPublicURL      string
+	APIBaseURL        string
 	CookieSecure      bool
 	CookieDomain      string
 	SessionTTL        time.Duration
@@ -42,7 +42,7 @@ func Load() (*Config, error) {
 	env := envOr("APP_ENV", "development")
 	port := envOr("PORT", "8080")
 	appURL := strings.TrimRight(envOr("APP_URL", "http://localhost:3000"), "/")
-	apiURL := strings.TrimRight(envOr("API_PUBLIC_URL", "http://localhost:"+port), "/")
+	apiBaseURL := appURL + "/api"
 
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -82,7 +82,7 @@ func Load() (*Config, error) {
 		}
 	}
 
-	cookieSecure := strings.HasPrefix(apiURL, "https://")
+	cookieSecure := strings.HasPrefix(appURL, "https://")
 	if raw := os.Getenv("COOKIE_SECURE"); raw != "" {
 		cookieSecure, err = strconv.ParseBool(raw)
 		if err != nil {
@@ -123,7 +123,7 @@ func Load() (*Config, error) {
 		SigningSecret:     []byte(signingSecret),
 		EncryptionKey:     encryptionKey,
 		AppURL:            appURL,
-		APIPublicURL:      apiURL,
+		APIBaseURL:        apiBaseURL,
 		CookieSecure:      cookieSecure,
 		CookieDomain:      os.Getenv("COOKIE_DOMAIN"),
 		SessionTTL:        ttl,

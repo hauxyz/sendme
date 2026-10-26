@@ -79,7 +79,7 @@ func main() {
 	}
 	tokens := auth.NewTokens([]byte(cfg.JWTSecret), cfg.SessionTTL, cfg.CookieSecure, cfg.CookieDomain)
 	mailerSvc := mailer.New()
-	tracker := tracking.New(cfg.SigningSecret, cfg.APIPublicURL)
+	tracker := tracking.New(cfg.SigningSecret, cfg.APIBaseURL)
 
 	apiServer := api.New(cfg, db, q, tokens, sealer, mailerSvc, tracker, logger)
 	httpServer := &http.Server{

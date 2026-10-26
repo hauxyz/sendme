@@ -168,8 +168,16 @@ func (s *Server) Router() http.Handler {
 			r.Get("/analytics/email-time-series", s.v1EmailTimeSeries)
 			r.Get("/analytics/reputation-metrics", s.v1ReputationMetrics)
 		})
+
+		// Public tracking and unsubscribe routes share the /api namespace so
+		// every public URL is served from <APP_URL>/api.
+		r.Get("/t/o/{file}", s.trackOpen)
+		r.Get("/t/c/{id}", s.trackClick)
+		r.Get("/u/{token}", s.unsubscribe)
 	})
 
+	// Keep the original root paths working for links generated before the API
+	// namespace was standardized.
 	r.Get("/t/o/{file}", s.trackOpen)
 	r.Get("/t/c/{id}", s.trackClick)
 	r.Get("/u/{token}", s.unsubscribe)
