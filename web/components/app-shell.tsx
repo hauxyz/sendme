@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  BarChart3,
   BookOpen,
   Check,
   ChevronDown,
@@ -32,6 +33,7 @@ import { Button } from "@/components/ui/button";
 
 const primaryNav = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/emails", label: "Emails", icon: Mail },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/contacts", label: "Contacts", icon: Users },

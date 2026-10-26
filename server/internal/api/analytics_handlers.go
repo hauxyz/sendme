@@ -25,6 +25,19 @@ type domainAnalytics struct {
 	OpenRate float64 `json:"open_rate"`
 }
 
+type campaignAnalytics struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Subject      string    `json:"subject"`
+	Status       string    `json:"status"`
+	Sent         int       `json:"sent"`
+	Opened       int       `json:"opened"`
+	Clicked      int       `json:"clicked"`
+	Failed       int       `json:"failed"`
+	ReadRate     float64   `json:"read_rate"`
+	LastActivity time.Time `json:"last_activity"`
+}
+
 func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 	if days < 7 || days > 90 {
@@ -38,8 +51,8 @@ func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			count(*) FILTER (WHERE status = 'sent'),
 			count(*) FILTER (WHERE status = 'failed'),
-			count(*) FILTER (WHERE opens > 0),
-			count(*) FILTER (WHERE clicks > 0)
+			count(*) FILTER (WHERE status = 'sent' AND opens > 0),
+			count(*) FILTER (WHERE status = 'sent' AND clicks > 0)
 		FROM emails WHERE workspace_id = $1 AND created_at >= $2
 	`, workspace, since).Scan(&sent, &failed, &opened, &clicked)
 	if err != nil {
@@ -70,13 +83,13 @@ func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 		opened_by_day AS (
 			SELECT date_trunc('day', ev.created_at)::date AS day, count(DISTINCT ev.email_id) AS opened
 			FROM email_events ev JOIN emails e ON e.id = ev.email_id
-			WHERE e.workspace_id = $1 AND ev.type = 'opened' AND ev.created_at >= $2
+			WHERE e.workspace_id = $1 AND e.status = 'sent' AND ev.type = 'opened' AND ev.created_at >= $2
 			GROUP BY 1
 		),
 		clicked_by_day AS (
 			SELECT date_trunc('day', ev.created_at)::date AS day, count(DISTINCT ev.email_id) AS clicked
 			FROM email_events ev JOIN emails e ON e.id = ev.email_id
-			WHERE e.workspace_id = $1 AND ev.type = 'clicked' AND ev.created_at >= $2
+			WHERE e.workspace_id = $1 AND e.status = 'sent' AND ev.type = 'clicked' AND ev.created_at >= $2
 			GROUP BY 1
 		)
 		SELECT days.day,
@@ -107,7 +120,7 @@ func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 	domainRows, err := s.db.Query(r.Context(), `
 		SELECT d.id, d.name, d.status,
 			count(e.id) FILTER (WHERE e.status = 'sent' AND e.created_at >= $2) AS sent,
-			count(e.id) FILTER (WHERE e.opens > 0 AND e.created_at >= $2) AS opened
+			count(e.id) FILTER (WHERE e.status = 'sent' AND e.opens > 0 AND e.created_at >= $2) AS opened
 		FROM domains d
 		LEFT JOIN emails e ON e.domain_id = d.id
 		WHERE d.workspace_id = $1
@@ -130,6 +143,39 @@ func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	domainRows.Close()
+
+	campaignRows, err := s.db.Query(r.Context(), `
+		SELECT c.id, c.name, c.subject, c.status,
+			count(*) FILTER (WHERE e.status = 'sent') AS sent,
+			count(*) FILTER (WHERE e.status = 'sent' AND e.opens > 0) AS opened,
+			count(*) FILTER (WHERE e.status = 'sent' AND e.clicks > 0) AS clicked,
+			count(*) FILTER (WHERE e.status = 'failed') AS failed,
+			max(e.created_at) AS last_activity
+		FROM campaigns c
+		JOIN emails e ON e.campaign_id = c.id AND e.created_at >= $2
+		WHERE c.workspace_id = $1
+		GROUP BY c.id
+		ORDER BY last_activity DESC
+	`, workspace, since)
+	if err != nil {
+		s.logger.Error("campaign analytics", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "Could not load analytics")
+		return
+	}
+	campaigns := make([]campaignAnalytics, 0)
+	for campaignRows.Next() {
+		var c campaignAnalytics
+		if err := campaignRows.Scan(
+			&c.ID, &c.Name, &c.Subject, &c.Status,
+			&c.Sent, &c.Opened, &c.Clicked, &c.Failed, &c.LastActivity,
+		); err == nil {
+			if c.Sent > 0 {
+				c.ReadRate = roundPercent(float64(c.Opened) / float64(c.Sent) * 100)
+			}
+			campaigns = append(campaigns, c)
+		}
+	}
+	campaignRows.Close()
 
 	recentRows, err := s.db.Query(r.Context(), emailSummarySelect+`
 		WHERE e.workspace_id = $1 ORDER BY e.created_at DESC LIMIT 6
@@ -170,6 +216,7 @@ func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
 		},
 		"series":        series,
 		"domains":       domains,
+		"campaigns":     campaigns,
 		"recent_emails": recentEmails,
 		"generated_at":  time.Now().UTC(),
 	})

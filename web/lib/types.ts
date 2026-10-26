@@ -206,6 +206,18 @@ export type Analytics = {
     opened: number;
     open_rate: number;
   }[];
+  campaigns: {
+    id: string;
+    name: string;
+    subject: string;
+    status: string;
+    sent: number;
+    opened: number;
+    clicked: number;
+    failed: number;
+    read_rate: number;
+    last_activity: string;
+  }[];
   recent_emails: EmailSummary[];
   generated_at: string;
 };
