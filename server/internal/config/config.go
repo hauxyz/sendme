@@ -17,23 +17,24 @@ import (
 const defaultDatabaseURL = "postgres://sendme:sendme@localhost:5432/sendme?sslmode=disable"
 
 type Config struct {
-	Env               string
-	Port              string
-	DatabaseURL       string
-	RedisURL          string
-	JWTSecret         string
-	SigningSecret     []byte
-	EncryptionKey     []byte
-	AppURL            string
-	APIBaseURL        string
-	CookieSecure      bool
-	CookieDomain      string
-	SessionTTL        time.Duration
-	WorkerEnabled     bool
-	WorkerConcurrency int
-	TrustedOrigins    []string
-	MailHeloHost      string
-	MailPublicIP      string
+	Env                  string
+	Port                 string
+	DatabaseURL          string
+	RedisURL             string
+	JWTSecret            string
+	SigningSecret        []byte
+	EncryptionKey        []byte
+	AppURL               string
+	APIBaseURL           string
+	CookieSecure         bool
+	CookieDomain         string
+	SessionTTL           time.Duration
+	WorkerEnabled        bool
+	WorkerConcurrency    int
+	TrustedOrigins       []string
+	MailHeloHost         string
+	MailPublicIP         string
+	CampaignSendInterval time.Duration
 }
 
 func Load() (*Config, error) {
@@ -114,24 +115,33 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("MAIL_PUBLIC_IP must be a valid IPv4 or IPv6 address")
 	}
 
+	campaignSendInterval := time.Duration(0)
+	if raw := strings.TrimSpace(os.Getenv("CAMPAIGN_SEND_INTERVAL")); raw != "" {
+		campaignSendInterval, err = time.ParseDuration(raw)
+		if err != nil || campaignSendInterval < 0 {
+			return nil, fmt.Errorf("CAMPAIGN_SEND_INTERVAL must be a positive duration, for example 1s")
+		}
+	}
+
 	return &Config{
-		Env:               env,
-		Port:              port,
-		DatabaseURL:       envOr("DATABASE_URL", defaultDatabaseURL),
-		RedisURL:          envOr("REDIS_URL", "redis://localhost:6379/0"),
-		JWTSecret:         jwtSecret,
-		SigningSecret:     []byte(signingSecret),
-		EncryptionKey:     encryptionKey,
-		AppURL:            appURL,
-		APIBaseURL:        apiBaseURL,
-		CookieSecure:      cookieSecure,
-		CookieDomain:      os.Getenv("COOKIE_DOMAIN"),
-		SessionTTL:        ttl,
-		WorkerEnabled:     workerEnabled,
-		WorkerConcurrency: concurrency,
-		TrustedOrigins:    origins,
-		MailHeloHost:      mailHeloHost,
-		MailPublicIP:      mailPublicIP,
+		Env:                  env,
+		Port:                 port,
+		DatabaseURL:          envOr("DATABASE_URL", defaultDatabaseURL),
+		RedisURL:             envOr("REDIS_URL", "redis://localhost:6379/0"),
+		JWTSecret:            jwtSecret,
+		SigningSecret:        []byte(signingSecret),
+		EncryptionKey:        encryptionKey,
+		AppURL:               appURL,
+		APIBaseURL:           apiBaseURL,
+		CookieSecure:         cookieSecure,
+		CookieDomain:         os.Getenv("COOKIE_DOMAIN"),
+		SessionTTL:           ttl,
+		WorkerEnabled:        workerEnabled,
+		WorkerConcurrency:    concurrency,
+		TrustedOrigins:       origins,
+		MailHeloHost:         mailHeloHost,
+		MailPublicIP:         mailPublicIP,
+		CampaignSendInterval: campaignSendInterval,
 	}, nil
 }
 

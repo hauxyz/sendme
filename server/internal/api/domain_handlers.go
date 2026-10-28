@@ -576,6 +576,17 @@ func validateDomainInput(req *domainInput, requirePassword bool) string {
 	return ""
 }
 
+type dnsCheck struct {
+	Type        string   `json:"type"`
+	Name        string   `json:"name"`
+	Found       bool     `json:"found"`
+	Status      string   `json:"status"`
+	Warning     string   `json:"warning,omitempty"`
+	Values      []string `json:"values"`
+	Description string   `json:"description"`
+	Recommended string   `json:"recommended,omitempty"`
+}
+
 func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 	d, err := s.loadDomain(r.Context(), workspaceID(r), chi.URLParam(r, "id"))
 	if err != nil {
@@ -586,16 +597,8 @@ func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	resolver := net.DefaultResolver
 
-	type check struct {
-		Type        string   `json:"type"`
-		Name        string   `json:"name"`
-		Found       bool     `json:"found"`
-		Values      []string `json:"values"`
-		Description string   `json:"description"`
-		Recommended string   `json:"recommended,omitempty"`
-	}
 	direct := d.DeliveryMode == mailer.ModeDirect
-	checks := make([]check, 0, 4)
+	checks := make([]dnsCheck, 0, 5)
 
 	mxRecords, _ := resolver.LookupMX(ctx, d.Name)
 	mxValues := make([]string, 0, len(mxRecords))
@@ -603,11 +606,17 @@ func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 		mxValues = append(mxValues, fmt.Sprintf("%d %s", record.Pref, strings.TrimSuffix(record.Host, ".")))
 	}
 	mxDescription := "A mail exchanger helps receivers validate that the domain accepts email."
+	mxStatus := "ok"
 	if direct {
 		mxDescription = "Optional for sending: an MX record is only needed if you want to receive replies or bounces. Direct delivery looks up the recipient's MX, not yours."
+		if len(mxValues) == 0 {
+			mxStatus = "optional"
+		}
+	} else if len(mxValues) == 0 {
+		mxStatus = "missing"
 	}
-	checks = append(checks, check{
-		Type: "MX", Name: d.Name, Found: len(mxValues) > 0, Values: mxValues,
+	checks = append(checks, dnsCheck{
+		Type: "MX", Name: d.Name, Found: len(mxValues) > 0, Status: mxStatus, Values: mxValues,
 		Description: mxDescription,
 	})
 
@@ -622,8 +631,23 @@ func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 	if direct {
 		spfDescription = "Authorize this server's public IP to send direct-to-MX email for this domain. Merge the ip4/ip6 mechanism into an existing SPF record rather than creating a second one."
 	}
-	checks = append(checks, check{
-		Type: "SPF", Name: d.Name, Found: len(spfValues) > 0, Values: spfValues,
+	spfStatus := "ok"
+	spfWarning := ""
+	switch {
+	case len(spfValues) == 0:
+		spfStatus = "missing"
+	case len(spfValues) > 1:
+		spfStatus = "warning"
+		spfWarning = "Multiple SPF records cause a permanent SPF error. Keep exactly one v=spf1 record and merge its mechanisms."
+	case direct && s.cfg.MailPublicIP == "":
+		spfStatus = "warning"
+		spfWarning = "MAIL_PUBLIC_IP is not set, so SendMe cannot verify that this SPF record authorizes the sending server. Set it in the environment to enable the check."
+	case direct && !spfAuthorizesIP(spfValues[0], s.cfg.MailPublicIP):
+		spfStatus = "warning"
+		spfWarning = "This SPF record does not contain an ip4/ip6 mechanism for MAIL_PUBLIC_IP. If the server is authorized through include, a, or mx, verify it covers that address."
+	}
+	checks = append(checks, dnsCheck{
+		Type: "SPF", Name: d.Name, Found: len(spfValues) > 0, Status: spfStatus, Warning: spfWarning, Values: spfValues,
 		Description: spfDescription, Recommended: s.spfRecommendedRecord(),
 	})
 
@@ -640,10 +664,31 @@ func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 				dkimValues = append(dkimValues, txt)
 			}
 		}
-		checks = append(checks, check{
-			Type: "DKIM", Name: dkimName, Found: len(dkimValues) > 0, Values: dkimValues,
+		dkimStatus := "ok"
+		if len(dkimValues) == 0 {
+			dkimStatus = "missing"
+		}
+		checks = append(checks, dnsCheck{
+			Type: "DKIM", Name: dkimName, Found: len(dkimValues) > 0, Status: dkimStatus, Values: dkimValues,
 			Description: "Publish this TXT record so receivers can verify the DKIM signature added to every outgoing message.",
 			Recommended: d.DKIMPublicKey,
+		})
+
+		helo := strings.TrimSpace(s.cfg.MailHeloHost)
+		if helo == "" {
+			helo = d.Name
+		}
+		found, values, warning := ptrDiagnostics(ctx, resolver, helo, s.cfg.MailPublicIP)
+		status := "ok"
+		if !found {
+			status = "missing"
+			if warning != "" && len(values) > 0 {
+				status = "warning"
+			}
+		}
+		checks = append(checks, dnsCheck{
+			Type: "PTR", Name: helo, Found: found, Status: status, Warning: warning, Values: values,
+			Description: "Receivers use reverse DNS to confirm that this server is allowed to send for the domain. The PTR name should match the EHLO host.",
 		})
 	}
 
@@ -654,15 +699,23 @@ func (s *Server) domainDNS(w http.ResponseWriter, r *http.Request) {
 			dmarcValues = append(dmarcValues, txt)
 		}
 	}
-	checks = append(checks, check{
-		Type: "DMARC", Name: "_dmarc." + d.Name, Found: len(dmarcValues) > 0, Values: dmarcValues,
+	dmarcStatus := "ok"
+	dmarcWarning := ""
+	if len(dmarcValues) == 0 {
+		dmarcStatus = "missing"
+	} else if policy := dmarcPolicy(dmarcValues[0]); policy == "none" || policy == "" {
+		dmarcStatus = "warning"
+		dmarcWarning = "p=none only monitors authentication failures. Once SPF and DKIM pass, move to p=quarantine or p=reject so receivers can trust the domain."
+	}
+	checks = append(checks, dnsCheck{
+		Type: "DMARC", Name: "_dmarc." + d.Name, Found: len(dmarcValues) > 0, Status: dmarcStatus, Warning: dmarcWarning, Values: dmarcValues,
 		Description: "Tell receivers how to handle email that fails authentication.",
 		Recommended: "v=DMARC1; p=none; rua=mailto:postmaster@" + d.Name,
 	})
 
-	note := "DKIM is usually added by your SMTP relay. Check your provider's documentation for the exact DKIM selector."
+	note := "DKIM is usually added by your SMTP relay. Check your provider's documentation for the exact DKIM selector. Domain and IP reputation live with receivers: review Google Postmaster Tools and Microsoft SNDS, remove hard bounces and unengaged contacts, and warm up new domains slowly."
 	if direct {
-		note = "Direct delivery needs outbound TCP port 25, SPF, and a PTR record for the EHLO host. SendMe does not receive inbound messages or bounces."
+		note = "Direct delivery needs outbound TCP port 25, SPF, a matching PTR record, and DKIM. Past spam classifications are part of domain and IP reputation at the receiver; they are not stored by SendMe and cannot be reset from code. Review Google Postmaster Tools and Microsoft SNDS, request delisting from any blocklist, and warm up slowly."
 		if s.cfg.MailHeloHost != "" {
 			note += " The configured EHLO host is " + s.cfg.MailHeloHost + "."
 		}
@@ -684,6 +737,100 @@ func (s *Server) spfRecommendedRecord() string {
 		prefix = "ip6:"
 	}
 	return "v=spf1 " + prefix + s.cfg.MailPublicIP + " -all"
+}
+
+func spfAuthorizesIP(record, ip string) bool {
+	parsedIP := net.ParseIP(strings.TrimSpace(ip))
+	if parsedIP == nil {
+		return false
+	}
+	for _, field := range strings.Fields(record) {
+		field = strings.TrimSpace(field)
+		if field == "" || strings.HasPrefix(field, "-") || strings.HasPrefix(field, "~") || strings.HasPrefix(field, "?") {
+			continue
+		}
+		field = strings.TrimPrefix(field, "+")
+		switch {
+		case strings.HasPrefix(strings.ToLower(field), "ip4:"), strings.HasPrefix(strings.ToLower(field), "ip6:"):
+			network := field[strings.IndexByte(field, ':')+1:]
+			if candidate := net.ParseIP(network); candidate != nil && candidate.Equal(parsedIP) {
+				return true
+			}
+			if _, cidr, err := net.ParseCIDR(network); err == nil && cidr.Contains(parsedIP) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dmarcPolicy(record string) string {
+	for _, part := range strings.Split(record, ";") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "p") {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
+}
+
+func ptrDiagnostics(ctx context.Context, resolver *net.Resolver, helo, publicIP string) (bool, []string, string) {
+	helo = strings.TrimSuffix(strings.TrimSpace(helo), ".")
+	if helo == "" {
+		return false, nil, "Set MAIL_HELO_HOST to the hostname whose PTR record points at this server."
+	}
+
+	ips := make([]string, 0)
+	if publicIP != "" {
+		ips = append(ips, publicIP)
+	} else {
+		resolved, err := resolver.LookupHost(ctx, helo)
+		if err != nil {
+			return false, nil, "Could not resolve the EHLO host " + helo + ". Set MAIL_HELO_HOST to a hostname with a matching PTR record."
+		}
+		ips = append(ips, resolved...)
+	}
+
+	names := make([]string, 0)
+	matched := false
+	confirmed := publicIP == ""
+	for _, ip := range ips {
+		records, err := resolver.LookupAddr(ctx, ip)
+		if err != nil {
+			continue
+		}
+		for _, name := range records {
+			name = strings.TrimSuffix(strings.TrimSpace(name), ".")
+			if name == "" {
+				continue
+			}
+			names = append(names, name)
+			if strings.EqualFold(name, helo) {
+				matched = true
+			}
+			if publicIP != "" {
+				resolved, err := resolver.LookupHost(ctx, name)
+				if err == nil {
+					want := net.ParseIP(publicIP)
+					for _, address := range resolved {
+						if got := net.ParseIP(address); got != nil && want != nil && got.Equal(want) {
+							confirmed = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(names) == 0 {
+		return false, nil, "No PTR record was found for " + strings.Join(ips, ", ") + ". Ask your hosting provider to set reverse DNS to " + helo + "."
+	}
+	if !matched {
+		return false, names, "The PTR record does not match the EHLO host " + helo + ". Receivers may treat the message as suspicious."
+	}
+	if !confirmed {
+		return false, names, "The PTR name does not resolve back to " + strings.Join(ips, ", ") + " (forward-confirmed reverse DNS failed). Receivers may treat the message as suspicious."
+	}
+	return true, names, ""
 }
 
 func htmlEscape(value string) string {

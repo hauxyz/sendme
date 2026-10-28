@@ -125,7 +125,8 @@ Copy `.env.example` to `.env` (or run `make init`) and adjust the values. The ba
 | `COOKIE_DOMAIN` | empty | Optional cookie domain. |
 | `TRUSTED_ORIGINS` | `APP_URL` | Comma-separated extra CORS origins. |
 | `WORKER_ENABLED` | `true` | Run the background worker inside the API process. |
-| `WORKER_CONCURRENCY` | `10` | Worker concurrency. |
+| `WORKER_CONCURRENCY` | `10` | Worker concurrency. Lower it while warming up a new domain. |
+| `CAMPAIGN_SEND_INTERVAL` | `0s` | Time between campaign recipient tasks. Set `1s` or `2s` to pace large sends; `0s` disables pacing. |
 | `MAIL_HELO_HOST` | sender domain | EHLO hostname for direct delivery. Set it to a hostname whose PTR record points at the server's public IP. |
 | `MAIL_PUBLIC_IP` | empty | Optional public IPv4/IPv6 address used to display the exact SPF record in DNS diagnostics. |
 | `NEXT_PUBLIC_APP_URL` | `APP_URL` | Build-time public origin rendered in dashboard API examples. Compose and `make` derive it from `APP_URL`; no separate value is normally needed. |
@@ -158,7 +159,7 @@ To add a domain:
    - **Amazon SES:** use SES SMTP credentials (not IAM access keys) and replace `us-east-1` with your SES region. Amazon SNS is a notification service and is not an SMTP email sender.
    - **Other relays:** use the SMTP host, port, security, and credentials from the provider.
 4. Save, choose a test recipient, and run **Test delivery**. A domain becomes `active` only after the recipient's MX or your relay accepts a real test email.
-5. Open **DNS** to inspect MX, SPF, DKIM, and DMARC records. Direct domains show the DKIM TXT value and a recommended SPF record based on `MAIL_PUBLIC_IP`.
+5. Open **DNS** to inspect MX, SPF, DKIM, DMARC, and PTR records. Direct domains show the DKIM TXT value and a recommended SPF record based on `MAIL_PUBLIC_IP`. Missing records, multiple SPF records, an SPF record that does not authorize the configured IP, `p=none`, and PTR mismatches are flagged with a warning.
 
 Only active domains can send email. The `From` address must belong to the selected domain. Reply-to, tracking, and unsubscribe behavior are configured per message or campaign.
 
@@ -173,6 +174,18 @@ Direct delivery avoids an external relay but still needs working email infrastru
 - Direct delivery is best for small, controlled volumes. High-volume senders should use a reputable SMTP relay for IP reputation and feedback loops.
 
 Presets for provider settings are UI conveniences only. SendMe does not call Amazon, Mailgun, SendGrid, or any other vendor API.
+
+## Deliverability and spam reputation
+
+Domain and IP reputation belongs to the receiving mailbox providers. If a domain or IP was previously used for mail that recipients marked as spam, no application change can erase that history. SendMe helps you fix what is under your control:
+
+- **Authenticate every message.** Direct domains sign with DKIM and should publish SPF and a DMARC policy. The DNS panel now checks SPF, DKIM, DMARC, MX, and the PTR record used for the EHLO host. Multiple SPF records, an SPF record that does not authorize `MAIL_PUBLIC_IP`, `p=none`, or a missing/mismatched PTR are flagged as warnings.
+- **Stop retrying rejected mail.** Permanent SMTP failures (5xx, authentication errors, policy and spam rejections) are marked failed immediately instead of being retried four times. Repeating a rejected message wastes attempts and can make reputation worse.
+- **Pace large sends.** Set `CAMPAIGN_SEND_INTERVAL=1s` (or `2s`) and lower `WORKER_CONCURRENCY` while a domain is warming up. Start with small volumes, then increase gradually.
+- **Send to engaged recipients only.** Remove hard bounces, stop mailing unsubscribed contacts, and avoid importing old purchased lists. High complaint rates are the quickest way to return to spam.
+- **Check receiver reputation tools.** Google Postmaster Tools and Microsoft SNDS show spam rates and domain/IP reputation. For blocklists, check the listing service, fix the underlying cause, then request delisting.
+
+If the domain has a long spam history, the practical fix is usually to warm a new sending subdomain (for example `mail.example.com`) or use a reputable SMTP relay with managed IP reputation. SendMe cannot process inbound spam complaints or feedback loops; use the relay's suppression tools when you need automatic complaint handling.
 
 ## Send with the API
 

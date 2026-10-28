@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadDerivesAPIBaseFromAppURL(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
@@ -20,5 +23,18 @@ func TestLoadDerivesAPIBaseFromAppURL(t *testing.T) {
 	}
 	if len(cfg.TrustedOrigins) == 0 || cfg.TrustedOrigins[0] != "https://mail.example.com" {
 		t.Fatalf("TrustedOrigins = %v, want APP_URL", cfg.TrustedOrigins)
+	}
+}
+
+func TestLoadCampaignSendInterval(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("CAMPAIGN_SEND_INTERVAL", "2s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.CampaignSendInterval, 2*time.Second; got != want {
+		t.Fatalf("CampaignSendInterval = %v, want %v", got, want)
 	}
 }

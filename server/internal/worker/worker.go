@@ -113,7 +113,11 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 
 	final := func(err error) error {
 		message := truncate(err.Error(), 1000)
-		if attempts >= maxEmailAttempts {
+		permanent := mailer.IsPermanent(err)
+		if permanent || attempts >= maxEmailAttempts {
+			if permanent {
+				message = truncate("Permanent delivery failure: "+message, 1000)
+			}
 			_, _ = w.db.Exec(context.Background(), `
 				UPDATE emails SET status = 'failed', error = $1, updated_at = now() WHERE id = $2
 			`, message, job.ID)
@@ -122,19 +126,19 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 			`, job.ID, message)
 			w.emitEmailEvent(job, "email.failed", map[string]any{"error": message, "attempts": attempts})
 			w.checkCampaignCompletion(job.CampaignID)
-		} else {
-			_, _ = w.db.Exec(context.Background(), `
-				UPDATE emails SET status = 'queued', error = $1, updated_at = now() WHERE id = $2
-			`, message, job.ID)
-			_, _ = w.db.Exec(context.Background(), `
-				INSERT INTO email_events (email_id, type, url) VALUES ($1, 'send_failed', $2)
-			`, job.ID, message)
+			return nil
 		}
+		_, _ = w.db.Exec(context.Background(), `
+			UPDATE emails SET status = 'queued', error = $1, updated_at = now() WHERE id = $2
+		`, message, job.ID)
+		_, _ = w.db.Exec(context.Background(), `
+			INSERT INTO email_events (email_id, type, url) VALUES ($1, 'send_failed', $2)
+		`, job.ID, message)
 		return err
 	}
 
 	if job.DomainID == nil {
-		return final(errors.New("sending domain has been removed"))
+		return final(mailer.Permanent(errors.New("sending domain has been removed")))
 	}
 	var domainName, deliveryMode, smtpHost, security, auth, username, encryptedPassword, selector, encryptedDKIM string
 	var smtpPort int
@@ -145,6 +149,9 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 	`, *job.DomainID).Scan(&domainName, &deliveryMode, &smtpHost, &smtpPort, &security, &auth, &username, &encryptedPassword,
 		&selector, &encryptedDKIM)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return final(mailer.Permanent(errors.New("sending domain has been removed")))
+		}
 		return final(fmt.Errorf("sending domain is unavailable: %w", err))
 	}
 
@@ -152,11 +159,11 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 	var dkimCfg *mailer.DKIMConfig
 	if deliveryMode == mailer.ModeDirect {
 		if encryptedDKIM == "" {
-			return final(errors.New("sending domain has no DKIM key; edit and save the domain to generate one"))
+			return final(mailer.Permanent(errors.New("sending domain has no DKIM key; edit and save the domain to generate one")))
 		}
 		privateKey, err := w.sealer.Decrypt(encryptedDKIM)
 		if err != nil {
-			return final(fmt.Errorf("could not decrypt DKIM key: %w", err))
+			return final(mailer.Permanent(fmt.Errorf("could not decrypt DKIM key: %w", err)))
 		}
 		if selector == "" {
 			selector = dkim.DefaultSelector
@@ -166,7 +173,7 @@ func (w *Worker) handleEmail(ctx context.Context, task *asynq.Task) error {
 		if encryptedPassword != "" {
 			password, err = w.sealer.Decrypt(encryptedPassword)
 			if err != nil {
-				return final(fmt.Errorf("could not decrypt SMTP password: %w", err))
+				return final(mailer.Permanent(fmt.Errorf("could not decrypt SMTP password: %w", err)))
 			}
 		}
 	}
@@ -365,8 +372,13 @@ func (w *Worker) handleCampaign(ctx context.Context, task *asynq.Task) error {
 		}
 	}
 	emailRows.Close()
-	for _, id := range queuedIDs {
-		if err := w.queue.EnqueueEmail(id, time.Time{}); err != nil {
+	interval := w.cfg.CampaignSendInterval
+	for index, id := range queuedIDs {
+		at := time.Time{}
+		if interval > 0 {
+			at = time.Now().Add(time.Duration(index) * interval)
+		}
+		if err := w.queue.EnqueueEmail(id, at); err != nil {
 			return fmt.Errorf("enqueue campaign email: %w", err)
 		}
 	}

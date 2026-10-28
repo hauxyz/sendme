@@ -23,6 +23,9 @@ type fakeSMTP struct {
 	mailFrom string
 	rcptTo   string
 	data     string
+
+	rcptReply string
+	dataReply string
 }
 
 func newFakeSMTP(t *testing.T) *fakeSMTP {
@@ -73,7 +76,12 @@ func (s *fakeSMTP) serve() {
 		case strings.HasPrefix(upper, "RCPT TO:"):
 			s.mu.Lock()
 			s.rcptTo = line
+			reply := s.rcptReply
 			s.mu.Unlock()
+			if reply != "" {
+				_ = writer.PrintfLine("%s", reply)
+				continue
+			}
 			_ = writer.PrintfLine("250 2.1.5 Ok")
 		case upper == "DATA":
 			_ = writer.PrintfLine("354 End data with <CR><LF>.<CR><LF>")
@@ -83,7 +91,12 @@ func (s *fakeSMTP) serve() {
 			}
 			s.mu.Lock()
 			s.data = string(data)
+			reply := s.dataReply
 			s.mu.Unlock()
+			if reply != "" {
+				_ = writer.PrintfLine("%s", reply)
+				continue
+			}
 			_ = writer.PrintfLine("250 2.0.0 Ok: queued")
 		case upper == "QUIT":
 			_ = writer.PrintfLine("221 2.0.0 Bye")
@@ -169,6 +182,63 @@ func TestDirectSendDeliversWithDKIM(t *testing.T) {
 	} {
 		if !strings.Contains(data, want) {
 			t.Errorf("message does not contain %q\n%s", want, data)
+		}
+	}
+}
+
+func TestRelayClassifiesPermanentAndTemporaryRejections(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		reply         string
+		wantPermanent bool
+	}{
+		{name: "spam rejection", reply: "554 5.7.1 message rejected as spam", wantPermanent: true},
+		{name: "unknown recipient", reply: "550 5.1.1 recipient does not exist", wantPermanent: true},
+		{name: "greylisted", reply: "451 4.7.1 greylisted, try again later", wantPermanent: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newFakeSMTP(t)
+			defer server.listener.Close()
+			server.dataReply = test.reply
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := New().Send(ctx, SMTPConfig{
+				Mode:      ModeSMTP,
+				Host:      "127.0.0.1",
+				Port:      server.port,
+				Security:  "none",
+				Auth:      "none",
+				FromEmail: "sender@example.test",
+			}, Message{
+				To:      "recipient@example.test",
+				Subject: "Rejection test",
+				Text:    "Hello.",
+			})
+			if err == nil {
+				t.Fatal("Send() succeeded, want rejection")
+			}
+			if got := IsPermanent(err); got != test.wantPermanent {
+				t.Fatalf("IsPermanent(%v) = %v, want %v", err, got, test.wantPermanent)
+			}
+		})
+	}
+}
+
+func TestClassifySMTPError(t *testing.T) {
+	for _, test := range []struct {
+		message       string
+		wantCode      int
+		wantPermanent bool
+	}{
+		{message: "535 5.7.8 authentication failed", wantCode: 535, wantPermanent: true},
+		{message: "550 5.7.1 rejected as spam", wantCode: 550, wantPermanent: true},
+		{message: "451 4.7.1 try again", wantCode: 451, wantPermanent: false},
+		{message: "connection refused", wantCode: 0, wantPermanent: false},
+	} {
+		code, permanent := classifySMTPError(fmt.Errorf("%s", test.message))
+		if code != test.wantCode || permanent != test.wantPermanent {
+			t.Errorf("classifySMTPError(%q) = %d, %v; want %d, %v", test.message, code, permanent, test.wantCode, test.wantPermanent)
 		}
 	}
 }

@@ -861,17 +861,30 @@ function DNSModal({ domain, onClose }: { domain: Domain | null; onClose: () => v
                   </span>
                   <span className="font-mono text-[11px] text-zinc-500">{check.name}</span>
                 </div>
-                {check.found ? (
+                {check.status === "ok" ? (
                   <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
                     <CheckCircle2 className="size-3" /> Found
                   </span>
-                ) : (
+                ) : check.status === "optional" ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
+                    <Clock className="size-3" /> Optional
+                  </span>
+                ) : check.status === "warning" ? (
                   <span className="inline-flex items-center gap-1 text-[11px] text-amber-400">
-                    <AlertTriangle className="size-3" /> Missing
+                    <AlertTriangle className="size-3" /> Needs attention
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-rose-400">
+                    <XCircle className="size-3" /> Missing
                   </span>
                 )}
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">{check.description}</p>
+              {check.warning ? (
+                <p className="mt-2 rounded border border-amber-500/15 bg-amber-500/[0.05] px-2 py-1.5 text-[11px] leading-relaxed text-amber-200/80">
+                  {check.warning}
+                </p>
+              ) : null}
               {check.values && check.values.length > 0 ? (
                 <div className="mt-2 space-y-1">
                   {check.values.map((value) => (

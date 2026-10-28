@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/mail"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,102 @@ var (
 	directPort = 25
 	lookupMXFn = lookupMailHosts
 )
+
+var (
+	smtpCodePattern     = regexp.MustCompile(`(?:^|[\s:])([45]\d{2})(?:[\s-]|$)`)
+	smtpEnhancedPattern = regexp.MustCompile(`\b([245])\.\d{1,3}\.\d{1,3}\b`)
+)
+
+// DeliveryError marks whether an SMTP failure is safe to retry. Permanent
+// failures (5xx, authentication, policy and spam rejections) should not be
+// retried: repeating them wastes attempts and can further damage sender
+// reputation.
+type DeliveryError struct {
+	Err       error
+	Permanent bool
+	Code      int
+}
+
+func (e *DeliveryError) Error() string { return e.Err.Error() }
+
+func (e *DeliveryError) Unwrap() error { return e.Err }
+
+// Permanent wraps err so callers know it must not be retried.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &DeliveryError{Err: err, Permanent: true}
+}
+
+// IsPermanent reports whether err represents a failure that will not improve
+// with another delivery attempt.
+func IsPermanent(err error) bool {
+	var deliveryErr *DeliveryError
+	return errors.As(err, &deliveryErr) && deliveryErr.Permanent
+}
+
+// DeliveryCode returns the SMTP status code carried by err, or 0 when the
+// failure did not come from an SMTP response.
+func DeliveryCode(err error) int {
+	var deliveryErr *DeliveryError
+	if errors.As(err, &deliveryErr) {
+		return deliveryErr.Code
+	}
+	return 0
+}
+
+func wrapDeliveryError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var deliveryErr *DeliveryError
+	if errors.As(err, &deliveryErr) {
+		return err
+	}
+	code, permanent := classifySMTPError(err)
+	return &DeliveryError{Err: err, Permanent: permanent, Code: code}
+}
+
+func classifySMTPError(err error) (int, bool) {
+	var sendErr *gomail.SendError
+	if errors.As(err, &sendErr) {
+		code := sendErr.ErrorCode()
+		if sendErr.IsTemp() {
+			return code, false
+		}
+		if code >= 500 && code < 600 {
+			return code, true
+		}
+		// A go-mail generated error (code 0) is usually a connection, DNS,
+		// TLS, or configuration problem. Some are permanent, but retrying is
+		// safer than dropping mail when the cause is ambiguous.
+		return code, false
+	}
+
+	message := err.Error()
+	code := 0
+	if match := smtpCodePattern.FindStringSubmatch(message); len(match) > 0 {
+		if parsed, parseErr := strconv.Atoi(match[1]); parseErr == nil {
+			code = parsed
+		}
+	}
+	if code >= 500 && code < 600 {
+		return code, true
+	}
+	if code >= 400 && code < 500 {
+		return code, false
+	}
+	if match := smtpEnhancedPattern.FindStringSubmatch(message); len(match) > 0 {
+		switch match[1] {
+		case "5":
+			return 0, true
+		case "4":
+			return 0, false
+		}
+	}
+	return 0, false
+}
 
 type DKIMConfig struct {
 	Domain        string
@@ -66,11 +164,11 @@ func New() *Service {
 
 func (s *Service) Send(ctx context.Context, cfg SMTPConfig, msg Message) error {
 	if _, err := mail.ParseAddress(cfg.FromEmail); err != nil {
-		return fmt.Errorf("invalid sender address: %w", err)
+		return Permanent(fmt.Errorf("invalid sender address: %w", err))
 	}
 	to, err := mail.ParseAddress(msg.To)
 	if err != nil {
-		return fmt.Errorf("invalid recipient address %q: %w", msg.To, err)
+		return Permanent(fmt.Errorf("invalid recipient address %q: %w", msg.To, err))
 	}
 
 	if cfg.Mode == ModeDirect {
@@ -81,10 +179,10 @@ func (s *Service) Send(ctx context.Context, cfg SMTPConfig, msg Message) error {
 
 func (s *Service) sendRelay(ctx context.Context, cfg SMTPConfig, msg Message, to *mail.Address) error {
 	if strings.TrimSpace(cfg.Host) == "" {
-		return fmt.Errorf("SMTP host is not configured")
+		return Permanent(fmt.Errorf("SMTP host is not configured"))
 	}
 	if cfg.Port < 1 || cfg.Port > 65535 {
-		return fmt.Errorf("invalid SMTP port")
+		return Permanent(fmt.Errorf("invalid SMTP port"))
 	}
 
 	opts := []gomail.Option{
@@ -100,7 +198,7 @@ func (s *Service) sendRelay(ctx context.Context, cfg SMTPConfig, msg Message, to
 	case "none", "":
 		opts = append(opts, gomail.WithTLSPolicy(gomail.NoTLS))
 	default:
-		return fmt.Errorf("unsupported SMTP security mode %q", cfg.Security)
+		return Permanent(fmt.Errorf("unsupported SMTP security mode %q", cfg.Security))
 	}
 	switch cfg.Auth {
 	case "plain":
@@ -110,7 +208,7 @@ func (s *Service) sendRelay(ctx context.Context, cfg SMTPConfig, msg Message, to
 	case "none", "":
 		// No authentication.
 	default:
-		return fmt.Errorf("unsupported SMTP authentication mode %q", cfg.Auth)
+		return Permanent(fmt.Errorf("unsupported SMTP authentication mode %q", cfg.Auth))
 	}
 
 	client, err := gomail.NewClient(cfg.Host, opts...)
@@ -119,12 +217,12 @@ func (s *Service) sendRelay(ctx context.Context, cfg SMTPConfig, msg Message, to
 	}
 	message, err := s.buildMessage(cfg, msg, to)
 	if err != nil {
-		return err
+		return Permanent(err)
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if err := client.DialAndSendWithContext(sendCtx, message); err != nil {
-		return fmt.Errorf("SMTP send failed: %w", err)
+		return wrapDeliveryError(fmt.Errorf("SMTP send failed: %w", err))
 	}
 	return nil
 }
@@ -135,18 +233,26 @@ func (s *Service) sendRelay(ctx context.Context, cfg SMTPConfig, msg Message, to
 func (s *Service) sendDirect(ctx context.Context, cfg SMTPConfig, msg Message, to *mail.Address) error {
 	recipientDomain, err := addressDomain(to.Address)
 	if err != nil {
-		return err
+		return Permanent(err)
 	}
 	hosts, err := lookupMXFn(ctx, recipientDomain)
 	if err != nil {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return Permanent(fmt.Errorf("recipient domain %s does not exist: %w", recipientDomain, err))
+		}
 		return err
 	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, directDeliveryTimeout)
 	defer cancel()
 
+	type failure struct {
+		host string
+		err  error
+	}
 	helo := heloHost(cfg)
-	failures := make([]string, 0, len(hosts))
+	failures := make([]failure, 0, len(hosts))
 	for _, host := range hosts {
 		if sendCtx.Err() != nil {
 			break
@@ -155,7 +261,7 @@ func (s *Service) sendDirect(ctx context.Context, cfg SMTPConfig, msg Message, t
 		message, buildErr := s.buildMessage(cfg, msg, to)
 		if buildErr != nil {
 			attemptCancel()
-			return buildErr
+			return Permanent(buildErr)
 		}
 		client, clientErr := gomail.NewClient(host,
 			gomail.WithPort(directPort),
@@ -165,7 +271,7 @@ func (s *Service) sendDirect(ctx context.Context, cfg SMTPConfig, msg Message, t
 		)
 		if clientErr != nil {
 			attemptCancel()
-			failures = append(failures, fmt.Sprintf("%s: %v", host, clientErr))
+			failures = append(failures, failure{host: host, err: clientErr})
 			continue
 		}
 		sendErr := client.DialAndSendWithContext(attemptCtx, message)
@@ -173,7 +279,7 @@ func (s *Service) sendDirect(ctx context.Context, cfg SMTPConfig, msg Message, t
 		if sendErr == nil {
 			return nil
 		}
-		failures = append(failures, fmt.Sprintf("%s: %v", host, sendErr))
+		failures = append(failures, failure{host: host, err: sendErr})
 	}
 	if sendCtx.Err() != nil && len(failures) == 0 {
 		return fmt.Errorf("direct delivery cancelled: %w", sendCtx.Err())
@@ -181,7 +287,24 @@ func (s *Service) sendDirect(ctx context.Context, cfg SMTPConfig, msg Message, t
 	if len(failures) == 0 {
 		return fmt.Errorf("direct delivery to %s failed", to.Address)
 	}
-	return fmt.Errorf("direct delivery to %s failed: %s", to.Address, strings.Join(failures, "; "))
+
+	parts := make([]string, 0, len(failures))
+	allPermanent := true
+	code := 0
+	for _, item := range failures {
+		parts = append(parts, fmt.Sprintf("%s: %v", item.host, item.err))
+		if !IsPermanent(item.err) {
+			allPermanent = false
+		}
+		if code == 0 {
+			code = DeliveryCode(item.err)
+		}
+	}
+	return &DeliveryError{
+		Err:       fmt.Errorf("direct delivery to %s failed: %s", to.Address, strings.Join(parts, "; ")),
+		Permanent: allPermanent,
+		Code:      code,
+	}
 }
 
 func (s *Service) buildMessage(cfg SMTPConfig, msg Message, to *mail.Address) (*gomail.Msg, error) {

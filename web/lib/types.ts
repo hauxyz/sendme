@@ -39,6 +39,8 @@ export type DNSResult = {
     type: string;
     name: string;
     found: boolean;
+    status: "ok" | "warning" | "missing" | "optional";
+    warning?: string;
     values: string[] | null;
     description: string;
     recommended?: string;
